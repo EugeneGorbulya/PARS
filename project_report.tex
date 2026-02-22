@@ -1,0 +1,882 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{booktabs}
+
+\geometry{margin=2.5cm}
+
+\lstset{
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    frame=single,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{gray},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray}
+}
+
+\title{PARS:\\Personalized Apartment Recommendation System\\Topic Defence}
+\author{Evgenii Gorbulia, 231 group DSBA}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Problem Statement}
+
+\subsection{Background and Motivation}
+
+Finding a suitable apartment for rent is a time-consuming and subjective process. Traditional real estate platforms rely on formal filters (price, area, number of rooms) but fail to capture user's aesthetic preferences, subjective perception of value, and convenience factors. Users must manually browse hundreds of listings to find apartments that match their personal taste.
+
+\textbf{Current limitations of existing systems:}
+\begin{itemize}
+    \item \textbf{No personalization:} Listings are sorted by price or publication date, not by user preferences.
+    \item \textbf{Lack of visual preference learning:} Systems cannot learn which interior styles appeal to specific users.
+    \item \textbf{Subjective value assessment:} "Price-quality" perception varies between individuals but is not captured.
+    \item \textbf{Limited location consideration:} Most platforms show distance in kilometers, not considering actual commute time or user priorities.
+    \item \textbf{Manual effort:} Users must actively search and cannot leverage collective knowledge or shared preferences.
+\end{itemize}
+
+\subsection{Project Goal}
+
+The goal of this project is to develop \textbf{PARS} — a personalized apartment recommendation system that learns user preferences from ratings and transforms apartment search into a tailored recommendation experience.
+
+\textbf{Key objectives:}
+\begin{enumerate}
+    \item Build a system that collects apartment listings from CIAN with photos and metadata.
+    \item Develop a Telegram bot interface for user interaction.
+    \item Implement a multi-task machine learning model that predicts user ratings on three independent factors:
+    \begin{itemize}
+        \item \textbf{Beauty} — visual aesthetic appeal
+        \item \textbf{Price-Quality} — perceived value for money
+        \item \textbf{Location} — convenience based on travel time to important points
+    \end{itemize}
+    \item Support both single-label ratings (1-5 scale) and pairwise comparisons for model refinement.
+    \item Implement exploration-mode to accelerate learning and avoid feedback loops.
+    \item Enable profile sharing and forking, allowing users to leverage pre-trained models from others.
+\end{enumerate}
+
+\subsection{Core Features}
+
+\subsubsection{For Users (Renters)}
+\begin{enumerate}
+    \item \textbf{Profile creation:} Configure search filters (city, price range, rooms) and define points of interest (workplace, gym) with maximum travel time.
+    
+    \item \textbf{Rating phase:} View apartment cards with photos from CIAN and rate them on three independent 1-5 scales (beauty, price-quality, location). Users can also skip non-evaluable listings.
+    
+    \item \textbf{Model training:} After collecting 80-120 ratings, the system trains a personalized preference model using:
+    \begin{itemize}
+        \item Visual embeddings (CLIP) from apartment photos
+        \item Tabular features (price, area, floor, travel time)
+        \item Three prediction heads (one per factor)
+    \end{itemize}
+    
+    \item \textbf{Pairwise comparison mode:} After initial training, users can compare apartment pairs by specific factor ("Which is more beautiful?", "Which is better value?") to refine model boundaries.
+    
+    \item \textbf{Personalized ranking:} Receive sorted list of apartments by combined score:
+    $$\text{score} = w_b \cdot \hat{\text{beauty}} + w_{pq} \cdot \hat{\text{price\_quality}} + w_d \cdot \hat{\text{distance}}$$
+    where $(w_b, w_{pq}, w_d)$ are user-defined factor weights.
+    
+    \item \textbf{Multiple profiles:} Create separate profiles for different scenarios (e.g., "work city center" vs. "country house weekend").
+    
+    \item \textbf{Profile sharing:} Publish profiles for others to use or fork (copy) a profile from another user while preserving the trained model but not personal ratings.
+\end{enumerate}
+
+\subsubsection{System Components}
+
+\begin{itemize}
+    \item \textbf{Telegram Bot:} User-facing interface built with aiogram 3. Handles onboarding, profile setup, apartment display, rating collection, and recommendation delivery.
+    
+    \item \textbf{Backend API (FastAPI):} Manages profiles, filters, ratings, and orchestrates data flow between components.
+    
+    \item \textbf{Fetcher Service:} Asynchronously collects apartment listings from CIAN Public API with deduplication and filtering.
+    
+    \item \textbf{Enricher Service:} Calculates travel time via 2GIS API, extracts visual embeddings using CLIP, and enriches apartment metadata.
+    
+    \item \textbf{ML Service:} Trains multi-task models with:
+    \begin{itemize}
+        \item \textbf{Stage A (Single-label):} Learns from 1-5 ratings with MSE/CrossEntropy loss
+        \item \textbf{Stage B (Pairwise):} Fine-tunes using hinge/logistic loss on pair comparisons
+        \item \textbf{Exploration-mode:} $\varepsilon$-greedy strategy + MMR for diversification
+        \item \textbf{Stability tracking:} Kendall $\tau$ on top-20 rankings to detect convergence
+    \end{itemize}
+    
+    \item \textbf{Ranker:} Computes final scores using trained model predictions and user weights, applies exploration logic, and generates delivery queue.
+    
+    \item \textbf{Data Storage:}
+    \begin{itemize}
+        \item PostgreSQL 15: users, profiles, apartments, ratings, pairwise comparisons
+        \item Redis: caching fresh listings and travel times
+        \item MinIO/S3: image storage and model checkpoints
+    \end{itemize}
+\end{itemize}
+
+\subsection{Technical Challenges}
+
+\begin{enumerate}
+    \item \textbf{Cold start:} How to provide reasonable recommendations when user has few ratings?
+    \begin{itemize}
+        \item \textit{Solution:} Exploration-mode with $\varepsilon$-greedy ($\varepsilon \approx$ 0.2 initially) to show diverse apartments; use public profiles as starting point.
+    \end{itemize}
+    
+    \item \textbf{Visual feature extraction:} How to represent apartment aesthetics numerically?
+    \begin{itemize}
+        \item \textit{Solution:} Use pre-trained CLIP (ViT-B/32) embeddings which capture visual semantics.
+    \end{itemize}
+    
+    \item \textbf{Multi-factor learning:} Beauty, price-quality, and location are independent — how to train efficiently?
+    \begin{itemize}
+        \item \textit{Solution:} Multi-task learning with shared backbone (CLIP + tabular encoder) and three separate prediction heads.
+    \end{itemize}
+    
+    \item \textbf{Overfitting and stability:} User might rate only "good" or only "bad" apartments.
+    \begin{itemize}
+        \item \textit{Solution:} Balanced sampling (low/medium/high ratings), Kendall $\tau$ stability check on top-20, hold-out validation by time.
+    \end{itemize}
+    
+    \item \textbf{Scalability:} How to efficiently handle large dataset (100,000+ apartments)?
+    \begin{itemize}
+        \item \textit{Solution:} Materialized score cache (\texttt{profile\_flat\_score} table), asynchronous training with Celery, indexes on frequently queried fields.
+    \end{itemize}
+    
+    \item \textbf{Exploration vs Exploitation:} Too much exploration frustrates users; too little causes filter bubbles.
+    \begin{itemize}
+        \item \textit{Solution:} Dynamic $\varepsilon$ adjustment based on stability metrics; MMR for diversity; UX limits (max 1-2 exploration items in a row).
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Expected Outcomes}
+
+\begin{enumerate}
+    \item A functional Telegram bot where users can:
+    \begin{itemize}
+        \item Create profiles with filters and POIs
+        \item Rate apartments on three factors
+        \item Receive personalized top-N recommendations
+        \item Compare pairs to refine model
+        \item Share and fork profiles
+    \end{itemize}
+    
+    \item A trained multi-task model achieving:
+    \begin{itemize}
+        \item Kendall $\tau$ $\geq$ 0.8 on top-20 stability after 80-120 ratings
+        \item MAE $<$ 0.5 on 1-5 rating scale
+        \item Balanced performance across all three factors
+    \end{itemize}
+    
+    \item An architecture supporting:
+    \begin{itemize}
+        \item Real-time apartment updates from CIAN
+        \item Incremental model retraining
+        \item Profile sharing and forking
+        \item Multiple POIs per profile
+    \end{itemize}
+    
+    \item Comprehensive documentation including:
+    \begin{itemize}
+        \item Database schema (normalized to BCNF)
+        \item API endpoints specification
+        \item Model architecture and training pipeline
+        \item Deployment guide with Docker Compose
+    \end{itemize}
+\end{enumerate}
+
+\newpage
+
+\section{Action Plan}
+
+\subsection{Overview}
+
+The development is structured into 6 major stages, progressing from infrastructure setup to full system integration. Each stage has specific deliverables and dependencies.
+
+\textbf{Estimated timeline:} 12-16 weeks
+
+\subsection{Stage 1: Infrastructure and Database (Weeks 1-2)}
+
+\textbf{Goal:} Set up development environment and database foundation.
+
+\subsubsection{Tasks}
+
+\begin{enumerate}
+    \item \textbf{Repository setup}
+    \begin{itemize}
+        \item Initialize git repository with .gitignore (Python, IDE)
+        \item Choose dependency manager (Poetry or requirements.txt)
+        \item Set up project structure
+    \end{itemize}
+    
+    \item \textbf{Docker Compose configuration}
+    \begin{itemize}
+        \item Create docker-compose.yml with services:
+        \begin{itemize}
+            \item PostgreSQL 15 (main storage)
+            \item Redis (cache and Celery broker)
+            \item MinIO (S3-compatible storage for images and models)
+        \end{itemize}
+        \item Configure networks and volumes
+        \item Write README with setup instructions
+    \end{itemize}
+    
+    \item \textbf{Database design (SQLAlchemy/Tortoise ORM)}
+    \begin{itemize}
+        \item Implement models based on schema:
+        \begin{itemize}
+            \item \texttt{users} (telegram\_id, created\_at)
+            \item \texttt{profiles} (alias, filters JSON, weights JSON, state, active\_model\_id)
+            \item \texttt{pois}, \texttt{profile\_pois} (points of interest and junction table)
+            \item \texttt{flats} (cian\_id, price, area, address, coordinates, features)
+            \item \texttt{flat\_photos} (flat\_id, url, s3\_path, vector\_id)
+            \item \texttt{ratings} (single-label: beauty, price-quality, distance 1-5)
+            \item \texttt{pairwise\_ratings} (A vs B comparisons)
+            \item \texttt{flat\_poi\_travel} (travel time cache)
+            \item \texttt{model\_snapshots}, \texttt{profile\_metrics}
+            \item \texttt{profile\_flat\_score} (materialized score cache)
+            \item \texttt{seen\_flats}, \texttt{saved\_flats}, \texttt{hidden\_flats}
+        \end{itemize}
+        \item Set up Alembic migrations
+        \item Write initial migration
+    \end{itemize}
+    
+    \item \textbf{Testing}
+    \begin{itemize}
+        \item Verify all services start with \texttt{docker-compose up}
+        \item Test database connection
+        \item Apply migrations successfully
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Deliverables}
+\begin{itemize}
+    \item Working docker-compose.yml
+    \item Database models in ORM
+    \item Initial Alembic migration
+    \item Setup documentation in README
+\end{itemize}
+
+\subsection{Stage 2: Data Collection (Fetcher \& Enricher) (Weeks 3-5)}
+
+\textbf{Goal:} Build services to collect and enrich apartment data.
+
+\subsubsection{Tasks}
+
+\begin{enumerate}
+    \item \textbf{CIAN Fetcher Service}
+    \begin{itemize}
+        \item Implement async client (httpx or aiohttp) for CIAN Public API
+        \item Parse apartment listings:
+        \begin{itemize}
+            \item Extract cian\_id, url, price, area, rooms, floor, address, coordinates
+            \item Download up to 10 preview photos per apartment
+        \end{itemize}
+        \item Deduplication logic: check \texttt{cian\_id} exists in database
+        \item Filter out inactive/outdated listings
+        \item Batch insert into \texttt{flats} and \texttt{flat\_photos} tables
+        \item Schedule periodic updates (e.g., every 1 hour via cron or Celery beat)
+    \end{itemize}
+    
+    \item \textbf{Geo-service (Enricher)}
+    \begin{itemize}
+        \item Integrate 2GIS Routing API (or OSRM for local alternative)
+        \item Implement distance matrix calculation: flat $\leftrightarrow$ POI
+        \item Cache results in \texttt{flat\_poi\_travel} with TTL (e.g., 7 days)
+        \item Handle rate limits and retries
+    \end{itemize}
+    
+    \item \textbf{Photo downloader}
+    \begin{itemize}
+        \item Download apartment photos from CIAN
+        \item Upload to MinIO/S3 with path: \texttt{photos/\{flat\_id\}/\{seq\}.jpg}
+        \item Store S3 path in \texttt{flat\_photos.url}
+    \end{itemize}
+    
+    \item \textbf{Testing}
+    \begin{itemize}
+        \item Fetch 100 real apartments from CIAN
+        \item Verify deduplication works
+        \item Check photos are downloaded and stored
+        \item Validate travel time calculation
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Deliverables}
+\begin{itemize}
+    \item Working CIAN fetcher script
+    \item Geo-service with 2GIS API integration
+    \item Photo downloader with S3 upload
+    \item At least 100 apartments in database for testing
+\end{itemize}
+
+\subsection{Stage 3: ML Core (Training and Inference) (Weeks 6-9)}
+
+\textbf{Goal:} Develop the preference prediction model.
+
+\subsubsection{Tasks}
+
+\begin{enumerate}
+    \item \textbf{Visual embeddings}
+    \begin{itemize}
+        \item Load pre-trained CLIP (OpenAI or RuCLIP)
+        \item Write script to generate embeddings for all photos
+        \item Save embeddings:
+        \begin{itemize}
+            \item Option A: pgvector extension in PostgreSQL
+            \item Option B: Save as .npy files in S3, store URI in \texttt{photo\_embeddings}
+        \end{itemize}
+        \item Test embedding retrieval speed
+    \end{itemize}
+    
+    \item \textbf{Preference model architecture (PyTorch)}
+    \begin{itemize}
+        \item Design backbone:
+        \begin{itemize}
+            \item CLIP image encoder (frozen or fine-tuned)
+            \item Tabular encoder for features (price, area, floor, travel time)
+            \item Concatenate embeddings
+        \end{itemize}
+        \item Add three prediction heads:
+        \begin{itemize}
+            \item \texttt{beauty\_head}: Linear layer → sigmoid/softmax
+            \item \texttt{price\_quality\_head}: Linear layer → sigmoid/softmax
+            \item \texttt{distance\_head}: Linear layer → sigmoid/softmax
+        \end{itemize}
+        \item Multi-task loss: average of three MSE/CrossEntropy losses
+    \end{itemize}
+    
+    \item \textbf{Dataset and Dataloader}
+    \begin{itemize}
+        \item Implement PyTorch Dataset for \texttt{ratings} table
+        \item Load embeddings, tabular features, and targets (beauty, price-quality, distance)
+        \item Handle missing values (nullable ratings)
+        \item Balanced sampling: stratify by rating bins (low/medium/high)
+        \item Train/validation split by time (e.g., 80\% earliest for train, 20\% latest for val)
+    \end{itemize}
+    
+    \item \textbf{Training pipeline - Stage A (Single-label)}
+    \begin{itemize}
+        \item Train on individual ratings (1-5 scale)
+        \item Loss: MSE or CrossEntropy per head, averaged
+        \item Optimizer: Adam with learning rate 1e-4
+        \item Early stopping based on validation loss
+        \item Save checkpoint to S3: \texttt{models/profile\_\{id\}\_snapshot\_\{timestamp\}.pt}
+        \item Record metrics: train/val loss per factor, Kendall $\tau$ on top-20
+    \end{itemize}
+    
+    \item \textbf{Training pipeline - Stage B (Pairwise)}
+    \begin{itemize}
+        \item Load \texttt{pairwise\_ratings} with comparisons (flat\_a, flat\_b, factor, preferred)
+        \item Loss: hinge or logistic loss (preferred flat should have higher score)
+        \item Fine-tune only heads, freeze backbone
+        \item Short training (10-20 epochs) with strong regularization
+        \item Update checkpoint
+    \end{itemize}
+    
+    \item \textbf{Exploration logic}
+    \begin{itemize}
+        \item Implement \texttt{get\_exploration\_candidates()}:
+        \begin{itemize}
+            \item $\varepsilon$-greedy: 80\% exploit (high score), 20\% explore (uncertain/new)
+            \item Uncertainty: high prediction variance or mid-range scores
+            \item Freshness: recently added apartments
+            \item Coverage: districts/price ranges with few ratings
+        \end{itemize}
+        \item MMR (Maximal Marginal Relevance):
+        \begin{itemize}
+            \item Compute cosine similarity of embeddings
+            \item Penalize candidates similar to already shown apartments
+        \end{itemize}
+    \end{itemize}
+    
+    \item \textbf{Testing}
+    \begin{itemize}
+        \item Train model and verify convergence
+        \item Check Kendall $\tau$ $\geq$ 0.8 on validation set
+        \item Test inference speed ($<$ 100ms for single prediction)
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Deliverables}
+\begin{itemize}
+    \item CLIP embedding generation script
+    \item PyTorch model definition
+    \item Training scripts for single-label and pairwise modes
+    \item Exploration logic implementation
+    \item Saved model checkpoint with metrics > 0.8 Kendall $\tau$
+\end{itemize}
+
+\subsection{Stage 4: Backend API (FastAPI) (Weeks 7-10)}
+
+\textbf{Goal:} Build REST API for bot and model interaction.
+
+\subsubsection{Tasks}
+
+\begin{enumerate}
+    \item \textbf{Core endpoints}
+    \begin{itemize}
+        \item \texttt{POST /users} — register user via telegram\_id
+        \item \texttt{POST /profiles} — create profile with filters, weights, POIs
+        \item \texttt{GET /profiles/\{id\}} — retrieve profile details
+        \item \texttt{PUT /profiles/\{id\}} — update weights or filters
+        \item \texttt{POST /profiles/\{id\}/fork} — fork profile from another user
+    \end{itemize}
+    
+    \item \textbf{Rating endpoints}
+    \begin{itemize}
+        \item \texttt{GET /flats/next?profile\_id=X} — get next apartment to rate
+        \begin{itemize}
+            \item Apply filters from profile
+            \item Exclude already rated/hidden apartments
+            \item Apply exploration logic ($\varepsilon$-greedy)
+            \item Return flat with photos and travel time
+        \end{itemize}
+        \item \texttt{POST /ratings} — save user rating (beauty, price-quality, distance)
+        \item \texttt{POST /pairwise} — save pairwise comparison
+        \item \texttt{GET /ratings?profile\_id=X} — get rating history
+    \end{itemize}
+    
+    \item \textbf{Recommendation endpoints}
+    \begin{itemize}
+        \item \texttt{GET /flats/top?profile\_id=X\&limit=10} — get top-N apartments
+        \begin{itemize}
+            \item Query \texttt{profile\_flat\_score} table
+            \item Filter by active, not hidden
+            \item Sort by score DESC
+        \end{itemize}
+        \item \texttt{POST /flats/\{id\}/save} — add to saved\_flats
+        \item \texttt{POST /flats/\{id\}/hide} — add to hidden\_flats
+    \end{itemize}
+    
+    \item \textbf{Training endpoints}
+    \begin{itemize}
+        \item \texttt{POST /profiles/\{id\}/train} — trigger model training
+        \begin{itemize}
+            \item Check if enough ratings ($\geq$ 80)
+            \item Enqueue Celery task for training
+            \item Return task\_id for status polling
+        \end{itemize}
+        \item \texttt{GET /profiles/\{id\}/metrics} — get training metrics (Kendall $\tau$, MAE, ratings count)
+    \end{itemize}
+    
+    \item \textbf{Background tasks (Celery/Arq)}
+    \begin{itemize}
+        \item \texttt{train\_profile\_task(profile\_id)} — run training pipeline
+        \item \texttt{update\_score\_cache\_task(profile\_id)} — recompute scores for all flats
+        \item \texttt{fetch\_cian\_task()} — periodic apartment updates
+        \item Set up Redis as broker and result backend
+    \end{itemize}
+    
+    \item \textbf{Testing}
+    \begin{itemize}
+        \item Write integration tests for all endpoints
+        \item Test concurrent requests
+        \item Verify async operations work correctly
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Deliverables}
+\begin{itemize}
+    \item FastAPI application with all endpoints
+    \item Celery tasks for training and updates
+    \item API documentation (auto-generated by FastAPI)
+    \item Integration tests
+\end{itemize}
+
+\subsection{Stage 5: Telegram Bot (aiogram 3) (Weeks 9-12)}
+
+\textbf{Goal:} Build user-facing Telegram bot interface.
+
+\subsubsection{Tasks}
+
+\begin{enumerate}
+    \item \textbf{FSM (Finite State Machine)}
+    \begin{itemize}
+        \item States:
+        \begin{itemize}
+            \item \texttt{Onboarding} — welcome message
+            \item \texttt{FilterSetup} — configuring search filters
+            \item \texttt{PoiSetup} — adding points of interest
+            \item \texttt{Browsing} — rating apartments
+            \item \texttt{PairwiseComparison} — comparing pairs
+            \item \texttt{ViewingTop} — browsing recommendations
+        \end{itemize}
+        \item Implement state transitions
+    \end{itemize}
+    
+    \item \textbf{Commands and handlers}
+    \begin{itemize}
+        \item \texttt{/start} — onboarding, explain system
+        \item \texttt{/new\_profile} — wizard for creating profile:
+        \begin{itemize}
+            \item Choose city
+            \item Set price range (min/max)
+            \item Select number of rooms
+            \item Add POI (work/gym) with max travel time
+            \item Set factor weights (beauty, price-quality, location)
+        \end{itemize}
+        \item \texttt{/profiles} — list profiles, switch active profile
+        \item \texttt{/next} — show next apartment card
+        \item \texttt{/compare} — enter pairwise comparison mode
+        \item \texttt{/top} — show top-10 recommendations
+        \item \texttt{/weights} — adjust factor weights
+        \item \texttt{/settings} — other settings
+    \end{itemize}
+    
+    \item \textbf{Apartment card}
+    \begin{itemize}
+        \item Display:
+        \begin{itemize}
+            \item Media group (up to 10 photos)
+            \item Price, area, address, metro station
+            \item Travel time to POI
+            \item Link to CIAN listing
+        \end{itemize}
+        \item Inline keyboard:
+        \begin{itemize}
+            \item Buttons: [Beauty: 1..5], [Price/Quality: 1..5], [Location: 1..5]
+            \item Actions: [Skip], [Open on CIAN], [Next]
+        \end{itemize}
+        \item After rating, automatically show next apartment
+    \end{itemize}
+    
+    \item \textbf{Pairwise comparison mode}
+    \begin{itemize}
+        \item User selects factor (beauty, price-quality, or location)
+        \item Bot shows two apartment cards side-by-side
+        \item Buttons: [A is better], [B is better], [Skip]
+        \item Record comparison in \texttt{pairwise\_ratings}
+    \end{itemize}
+    
+    \item \textbf{Recommendations view}
+    \begin{itemize}
+        \item Show top-10 apartments sorted by score
+        \item Display:
+        \begin{itemize}
+            \item Thumbnail
+            \item Price, area, address
+            \item Predicted scores: beauty, price-quality, location
+            \item Overall score
+        \end{itemize}
+        \item Actions: [Open], [Save], [Hide]
+    \end{itemize}
+    
+    \item \textbf{Progress tracking}
+    \begin{itemize}
+        \item Periodically show training progress:
+        \begin{itemize}
+            \item "You've rated 45 apartments. \textasciitilde35 more for accurate recommendations."
+            \item "Model stability: 0.72 (good, but not stable yet)"
+        \end{itemize}
+        \item When ready: "Your model is trained! Try /top to see recommendations."
+    \end{itemize}
+    
+    \item \textbf{Profile sharing}
+    \begin{itemize}
+        \item \texttt{/publish} — make profile public, generate slug
+        \item \texttt{/fork <slug>} — copy another user's profile
+        \item \texttt{/browse\_profiles} — list popular public profiles
+    \end{itemize}
+    
+    \item \textbf{Testing}
+    \begin{itemize}
+        \item Test all commands and state transitions
+        \item Verify media groups display correctly
+        \item Test bot stability and error handling
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Deliverables}
+\begin{itemize}
+    \item Working Telegram bot with all commands
+    \item FSM implementation
+    \item Apartment card with ratings
+    \item Pairwise comparison flow
+    \item Top recommendations view
+    \item Profile sharing and forking
+\end{itemize}
+
+\subsection{Stage 6: Integration and Launch (Weeks 13-16)}
+
+\textbf{Goal:} Integrate all components and deploy system.
+
+\subsubsection{Tasks}
+
+\begin{enumerate}
+    \item \textbf{System integration}
+    \begin{itemize}
+        \item Connect bot to backend API
+        \item Verify end-to-end flow:
+        \begin{itemize}
+            \item User creates profile → filters stored
+            \item User rates apartments → ratings saved
+            \item Trigger training → model trained and checkpoint saved
+            \item Request top-10 → scores computed and returned
+        \end{itemize}
+        \item Test end-to-end workflow manually
+    \end{itemize}
+    
+    \item \textbf{Performance optimization}
+    \begin{itemize}
+        \item Identify slow queries using EXPLAIN ANALYZE
+        \item Add appropriate database indexes based on query patterns
+        \item Cache frequently accessed data in Redis
+        \item Profile and optimize bottlenecks
+    \end{itemize}
+    
+    \item \textbf{Monitoring and logging}
+    \begin{itemize}
+        \item Set up centralized logging (e.g., ELK stack or Loki)
+        \item Add error tracking (e.g., Sentry)
+        \item Create basic dashboards:
+        \begin{itemize}
+            \item Number of users, profiles, ratings
+            \item Average model training time
+            \item API response times
+        \end{itemize}
+    \end{itemize}
+    
+    \item \textbf{Documentation}
+    \begin{itemize}
+        \item Update README with:
+        \begin{itemize}
+            \item Quick start guide
+            \item Architecture diagram
+            \item Deployment instructions
+        \end{itemize}
+        \item Document API endpoints (OpenAPI/Swagger)
+        \item Write model training guide
+    \end{itemize}
+    
+    \item \textbf{Deployment}
+    \begin{itemize}
+        \item Prepare production docker-compose.yml
+        \item Set up reverse proxy (NGINX) for API
+        \item Configure environment variables (API keys, database passwords)
+        \item Deploy to server (e.g., DigitalOcean, AWS, or local server)
+        \item Set up automated backups for PostgreSQL
+    \end{itemize}
+    
+    \item \textbf{Testing and validation}
+    \begin{itemize}
+        \item Comprehensive system testing
+        \item Monitor for bugs and errors
+        \item Fix critical issues
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Deliverables}
+\begin{itemize}
+    \item Fully integrated system ready for deployment
+    \item Performance-optimized database with indexes
+    \item Monitoring and logging setup
+    \item Complete documentation
+\end{itemize}
+
+\subsection{Risk Management}
+
+\subsubsection{Potential Risks}
+
+\begin{enumerate}
+    \item \textbf{CIAN API changes or rate limits}
+    \begin{itemize}
+        \item \textit{Mitigation:} Cache data aggressively; implement fallback to HTML parsing; request API access from CIAN officially
+    \end{itemize}
+    
+    \item \textbf{Model doesn't converge or produces poor predictions}
+    \begin{itemize}
+        \item \textit{Mitigation:} Start with simpler baseline (e.g., linear regression on tabular features only); add CLIP gradually; collect more ratings before training
+    \end{itemize}
+    
+    \item \textbf{Insufficient rating diversity in training data}
+    \begin{itemize}
+        \item \textit{Mitigation:} Increase exploration (higher $\varepsilon$); ensure ratings cover different price ranges and districts; implement progress indicators
+    \end{itemize}
+    
+    \item \textbf{Scalability issues with embeddings storage}
+    \begin{itemize}
+        \item \textit{Mitigation:} Use pgvector for fast retrieval; compress embeddings with PCA if necessary; index on S3 URIs
+    \end{itemize}
+    
+    \item \textbf{2GIS API rate limits}
+    \begin{itemize}
+        \item \textit{Mitigation:} Aggressive caching (7+ days TTL); use OSRM (open-source) as fallback; limit POIs per profile; 2GIS offers more accessible and affordable API compared to alternatives
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Success Metrics}
+
+\begin{enumerate}
+    \item \textbf{Technical metrics:}
+    \begin{itemize}
+        \item Model Kendall $\tau$ $\geq$ 0.8 after 100 ratings
+        \item MAE $<$ 0.5 on 1-5 scale
+        \item API response time $<$ 500ms for /next, $<$ 1s for /top
+        \item System maintains stable performance under load
+    \end{itemize}
+    
+    \item \textbf{System behavior metrics:}
+    \begin{itemize}
+        \item System supports profiles with at least 80 ratings
+        \item Model achieves consistent top-10 recommendations after training
+        \item Profile training completes within reasonable time (under 5 minutes)
+    \end{itemize}
+    
+    \item \textbf{Functional metrics:}
+    \begin{itemize}
+        \item All 6 stages completed and integrated
+        \item Zero critical bugs in production
+        \item Documentation covers all features
+    \end{itemize}
+\end{enumerate}
+
+\newpage
+
+\section{Conclusion}
+
+This report outlines the comprehensive plan for developing \textbf{PARS}, a personalized apartment recommendation system. The project addresses the limitations of traditional real estate platforms by incorporating machine learning to learn individual user preferences across three independent factors: beauty, price-quality, and location.
+
+The action plan divides development into 6 structured stages over 12-16 weeks:
+\begin{enumerate}
+    \item Infrastructure and Database
+    \item Data Collection (Fetcher \& Enricher)
+    \item ML Core (Training and Inference)
+    \item Backend API (FastAPI)
+    \item Telegram Bot (aiogram 3)
+    \item Integration and Launch
+\end{enumerate}
+
+Each stage has clear tasks, deliverables, and success criteria. The system architecture follows microservices principles with independent components (Fetcher, Enricher, ML Service, Ranker) orchestrated through a FastAPI backend.
+
+Key technical innovations include:
+\begin{itemize}
+    \item Multi-task learning with three prediction heads
+    \item Visual feature extraction using CLIP
+    \item Two-phase training (single-label → pairwise)
+    \item Exploration-mode with $\varepsilon$-greedy + MMR
+    \item Profile sharing and forking for collaborative learning
+\end{itemize}
+
+Upon completion, users will be able to train personalized apartment ranking models through natural interaction in Telegram, receive tailored recommendations, and share their "taste profiles" with others — transforming apartment search from manual filtering into an intelligent recommendation experience.
+
+\newpage
+
+\section{Bibliography}
+
+\subsection{Core Technologies and Frameworks}
+
+\begin{enumerate}
+    \item \textbf{OpenAI CLIP (Contrastive Language-Image Pre-Training)}\\
+    Radford, A., et al. (2021). "Learning Transferable Visual Models From Natural Language Supervision." \\
+    \textit{arXiv preprint arXiv:2103.00020}.\\
+    \url{https://arxiv.org/abs/2103.00020}\\
+    \textit{Used for visual embeddings of apartment photos.}
+    
+    \item \textbf{PyTorch - Deep Learning Framework}\\
+    Paszke, A., et al. (2019). "PyTorch: An Imperative Style, High-Performance Deep Learning Library." \\
+    \textit{Advances in Neural Information Processing Systems 32}.\\
+    \url{https://pytorch.org/}\\
+    \textit{Framework for building multi-task learning models with separate heads for beauty, price-quality, and location factors.}
+    
+    \item \textbf{FastAPI - Modern Web Framework}\\
+    Ramírez, S. (2018--2024). "FastAPI: Modern, fast (high-performance), web framework for building APIs with Python 3.7+."\\
+    \url{https://fastapi.tiangolo.com/}\\
+    \textit{Used for building asynchronous API layer.}
+    
+    \item \textbf{aiogram - Telegram Bot Framework}\\
+    aiogram development team. "aiogram 3.x - Modern and fully asynchronous framework for Telegram Bot API."\\
+    \url{https://docs.aiogram.dev/}\\
+    \textit{Used for building user-facing Telegram bot interface.}
+    
+    \item \textbf{PostgreSQL - Relational Database}\\
+    PostgreSQL Global Development Group. "PostgreSQL Documentation, Version 15."\\
+    \url{https://www.postgresql.org/docs/15/}\\
+    \textit{Primary data storage for users, profiles, ratings, and apartments.}
+\end{enumerate}
+
+\subsection{Machine Learning and Recommendation Systems}
+
+\begin{enumerate}[resume]
+    \item \textbf{Multi-Task Learning}\\
+    Caruana, R. (1997). "Multitask Learning." \\
+    \textit{Machine Learning, 28(1), 41-75}.\\
+    \textit{Theoretical foundation for training three factor prediction heads simultaneously.}
+    
+    \item \textbf{Pairwise Ranking and Learning to Rank}\\
+    Burges, C., et al. (2005). "Learning to Rank using Gradient Descent." \\
+    \textit{Proceedings of the 22nd International Conference on Machine Learning}.\\
+    \textit{Used for pairwise comparison training phase.}
+    
+    \item \textbf{Exploration vs Exploitation ($\varepsilon$-greedy Strategy)}\\
+    Sutton, R. S., \& Barto, A. G. (2018). "Reinforcement Learning: An Introduction." \\
+    \textit{MIT Press, 2nd Edition}.\\
+    \textit{Theoretical basis for exploration-mode in recommendation delivery.}
+    
+    \item \textbf{Maximal Marginal Relevance (MMR)}\\
+    Carbonell, J., \& Goldstein, J. (1998). "The Use of MMR, Diversity-Based Reranking for Reordering Documents and Producing Summaries." \\
+    \textit{Proceedings of the 21st ACM SIGIR Conference}.\\
+    \textit{Used for diversifying apartment recommendations.}
+\end{enumerate}
+
+\subsection{Data Sources and APIs}
+
+\begin{enumerate}[resume]
+    \item \textbf{CIAN API - Real Estate Platform}\\
+    CIAN. "CIAN API Documentation."\\
+    \url{https://www.cian.ru/}\\
+    \textit{Source of apartment listings and photos.}
+    
+    \item \textbf{2GIS API - Routing and Distance Matrix}\\
+    2GIS. "2GIS API Documentation."\\
+    \url{https://api.2gis.com/}\\
+    \textit{Used for calculating travel time to points of interest.}
+\end{enumerate}
+
+\subsection{System Design and Architecture}
+
+\begin{enumerate}[resume]
+    \item \textbf{Microservices Architecture}\\
+    Newman, S. (2015). "Building Microservices: Designing Fine-Grained Systems." \\
+    \textit{O'Reilly Media}.\\
+    \textit{Architectural pattern for separating Fetcher, Enricher, ML Service, and Ranker components.}
+    
+    \item \textbf{Celery - Distributed Task Queue}\\
+    Ask Solem. "Celery: Distributed Task Queue."\\
+    \url{https://docs.celeryq.dev/}\\
+    \textit{Used for asynchronous model training and cache updates.}
+    
+    \item \textbf{Redis - In-Memory Data Store}\\
+    Redis Labs. "Redis Documentation."\\
+    \url{https://redis.io/documentation}\\
+    \textit{Used for caching and message broker.}
+    
+    \item \textbf{MinIO/S3 - Object Storage}\\
+    MinIO, Inc. "MinIO High Performance Object Storage."\\
+    \url{https://min.io/docs/}\\
+    \textit{Storage for images and model checkpoints.}
+\end{enumerate}
+
+\subsection{Relevant Research Papers}
+
+\begin{enumerate}[resume]
+    \item \textbf{Cold Start Problem in Recommender Systems}\\
+    Schein, A. I., et al. (2002). "Methods and Metrics for Cold-Start Recommendations." \\
+    \textit{Proceedings of the 25th ACM SIGIR Conference}.\\
+    \textit{Addresses initial phase when user has few ratings.}
+    
+    \item \textbf{Active Learning for Preference Elicitation}\\
+    Settles, B. (2009). "Active Learning Literature Survey." \\
+    \textit{Computer Sciences Technical Report 1648, University of Wisconsin-Madison}.\\
+    \textit{Foundation for exploration-mode intelligent selection.}
+\end{enumerate}
+
+\end{document}
+

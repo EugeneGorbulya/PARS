@@ -4,12 +4,12 @@ from sqlalchemy.dialects.postgresql import insert
 from typing import List
 
 from models import Flat, POI, FlatPoiTravel, ProfilePOI
-from services.geo.provider import BaseGeoProvider, MockGeoProvider
+from services.geo.provider import BaseGeoProvider, create_geo_provider
 
 class GeoEnricherService:
     def __init__(self, session: AsyncSession, provider: BaseGeoProvider = None):
         self.session = session
-        self.provider = provider or MockGeoProvider()
+        self.provider = provider or create_geo_provider()
 
     async def enrich_profile_flats(self, profile_id: int, limit: int = 100):
         """

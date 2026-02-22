@@ -1,0 +1,1190 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{longtable}
+
+\geometry{margin=2.5cm}
+
+\lstset{
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    frame=single,
+    language=SQL,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{gray},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray}
+}
+
+\title{Database Design\\PARS: Personalized Apartment Ranking System}
+\author{Student Group}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Planned End Users and Their Needs}
+
+\subsection{End Users}
+
+The PARS (Personalized Apartment Ranking System) is designed for the following user categories:
+
+\begin{enumerate}
+    \item \textbf{Apartment renters} — the primary target group. Users looking for apartments to rent who want to receive personalized recommendations based on their visual and functional preferences, not just formal filters.
+    
+    \item \textbf{System administrators} — manage data, machine learning models, update apartment information from external sources (CIAN API).
+\end{enumerate}
+
+\subsection{User Needs}
+
+\subsubsection{Renters}
+\begin{itemize}
+    \item \textbf{Personalized search:} Ability to train the system to their taste by rating apartments on three factors (beauty, price-quality, location).
+    
+    \item \textbf{Flexible filters:} Configuration of search parameters (city, price range, number of rooms, floor) and points of interest (workplace, gym, etc.).
+    
+    \item \textbf{Multiple profiles:} Ability to create multiple profiles for different scenarios (e.g., work in the city center and country house).
+    
+    \item \textbf{Rating history:} View previously rated apartments and ability to change ratings.
+    
+    \item \textbf{Recommendations:} Receive personalized apartment rankings based on trained model.
+    
+    \item \textbf{Profile sharing:} Ability to use pre-trained profiles from other users or share your own.
+    
+    \item \textbf{Quick access:} View apartment photos, travel time information to important points, links to full listings.
+\end{itemize}
+
+\subsubsection{Administrators}
+\begin{itemize}
+    \item \textbf{Data management:} Add, update, and delete apartment listings.
+    
+    \item \textbf{Monitoring:} Track model training metrics, prediction stability.
+    
+    \item \textbf{Maintenance:} Update caches, clean up outdated data, manage model versions.
+\end{itemize}
+
+\section{Functional Requirements and Data Restrictions}
+
+\subsection{Functional Requirements}
+
+\subsubsection{User and Profile Management}
+\begin{enumerate}
+    \item The system must register users via Telegram (by \texttt{tg\_user\_id}).
+    \item User can create one or more profiles (alias). Within a single user, profile names must be unique.
+    \item Each profile contains:
+    \begin{itemize}
+        \item Search filters (city, price range, number of rooms, floor) in JSON format.
+        \item Factor weights (beauty, price-quality, location), the sum of which must equal 1.0.
+        \item Exploration parameter (ε-greedy) for managing the balance between exploit and explore.
+        \item Learning stage ('single' or 'pairwise').
+    \end{itemize}
+    \item Profile can be public (accessible to other users) or private.
+    \item Public profile must have a unique \texttt{public\_slug} for access.
+    \item Profile can be forked (copied) from another profile with weights and model preserved, but without rating history.
+\end{enumerate}
+
+\subsubsection{Points of Interest (POI) Management}
+\begin{enumerate}
+    \item User can create multiple points of interest (work, gym, etc.) with coordinates (latitude, longitude).
+    \item Within a single user, POI labels must be unique.
+    \item Profile can be linked to one or more POIs through the junction table \texttt{profile\_pois}.
+    \item For each profile-POI relationship, maximum travel time and transport mode (masstransit, driving, walking) are specified.
+\end{enumerate}
+
+\subsubsection{Apartment Management}
+\begin{enumerate}
+    \item The system stores apartment listings from CIAN with a unique \texttt{cian\_id}.
+    \item Each apartment contains basic information: price, area, number of rooms, floor, address, coordinates, nearest metro station.
+    \item Apartment can have multiple photos, ordered by the \texttt{seq} field.
+    \item For each photo, a visual embedding (CLIP) can be computed, which is stored in S3, and the link is stored in the database.
+    \item Apartment can be active or deactivated.
+\end{enumerate}
+
+\subsubsection{Travel Time Calculation}
+\begin{enumerate}
+    \item For each pair (apartment, POI), travel time can be calculated and cached for different transport modes.
+    \item Cache has TTL (\texttt{expires\_at}) for periodic updates.
+\end{enumerate}
+
+\subsubsection{Ratings and Learning}
+\begin{enumerate}
+    \item User can rate an apartment on three factors (1-5): beauty (\texttt{beauty}), price-quality (\texttt{price\_quality}), location (\texttt{distance\_pref}).
+    \item Within a single profile, user can rate each apartment only once (uniqueness by \texttt{user\_id}, \texttt{profile\_id}, \texttt{flat\_id}).
+    \item Ratings can be incomplete (nullable fields), but at least one factor must be rated, otherwise the record is marked as \texttt{skipped=true}.
+    \item User can compare two apartments pairwise by selected factor (pairwise comparisons).
+    \item Within a single profile, there cannot be two identical comparison pairs for one factor (uniqueness by \texttt{user\_id}, \texttt{profile\_id}, \texttt{flat\_a\_id}, \texttt{flat\_b\_id}, \texttt{factor}).
+    \item \texttt{preferred\_flat\_id} in pairwise must equal either \texttt{flat\_a\_id} or \texttt{flat\_b\_id}.
+\end{enumerate}
+
+\subsubsection{Delivery Queue and View History}
+\begin{enumerate}
+    \item The system maintains a queue of apartments for display to each profile (\texttt{profile\_delivery\_queue}).
+    \item Each apartment in the queue has a state: 'queued', 'shown', 'rated', 'skipped'.
+    \item User can save or hide apartments, which should exclude them from future deliveries.
+    \item The system tracks viewed apartments to exclude repeats.
+\end{enumerate}
+
+\subsubsection{Machine Learning Models}
+\begin{enumerate}
+    \item For each profile, a preference prediction model can be trained.
+    \item Model is saved as a checkpoint (snapshot) in S3 with metrics (Kendall τ, MAE).
+    \item Profile stores a reference to the last trained snapshot.
+    \item The system maintains profile metrics: number of ratings, number of pairwise comparisons, current stability.
+\end{enumerate}
+
+\subsubsection{Ranking and Score Cache}
+\begin{enumerate}
+    \item For each pair (profile, apartment), final score can be calculated and cached.
+    \item Score is calculated as a weighted sum of factor predictions: 
+    $$\text{score} = w_b \cdot \hat{beauty} + w_{pq} \cdot \hat{price\_quality} + w_d \cdot \hat{distance}$$
+\end{enumerate}
+
+\subsection{Data Restrictions}
+
+\subsubsection{Required Fields}
+\begin{itemize}
+    \item \texttt{users}: \texttt{tg\_user\_id} must be unique if specified.
+    \item \texttt{profiles}: \texttt{cian\_filter} cannot be NULL, weights must be in range [0,1], sum of weights must be ≈ 1.0.
+    \item \texttt{flats}: \texttt{cian\_id} must be unique, \texttt{active} defaults to \texttt{true}.
+    \item \texttt{ratings}: at least one of the fields (\texttt{beauty}, \texttt{price\_quality}, \texttt{distance\_pref}) must be not NULL, otherwise \texttt{skipped=true}.
+    \item \texttt{ratings}: ratings must be in range 1-5 if specified.
+\end{itemize}
+
+\subsubsection{Referential Integrity}
+\begin{itemize}
+    \item All foreign keys must reference existing records.
+    \item When a user is deleted, their profiles, POIs, and ratings are cascaded deleted (or deletion restriction is set).
+    \item When an apartment is deleted, photos and related records are cascaded deleted.
+    \item When a profile is deleted, related ratings, delivery queue, and metrics are cascaded deleted.
+\end{itemize}
+
+\subsubsection{Business Rules}
+\begin{itemize}
+    \item User cannot rate the same apartment twice within one profile.
+    \item Pairwise comparison cannot be made between the same apartment (flat\_a\_id ≠ flat\_b\_id).
+    \item Profile cannot be forked from itself (recursive check).
+    \item Public profile must have a unique \texttt{public\_slug}.
+\end{itemize}
+
+\section{Non-Functional Requirements}
+
+\begin{enumerate}
+    \item \textbf{Performance:}
+    \begin{itemize}
+        \item Query to get next apartment must execute in no more than 500ms.
+        \item Query to get top-10 recommendations must execute in no more than 1s.
+        \item Caching of travel time to reduce load on external APIs.
+    \end{itemize}
+    
+    \item \textbf{Scalability:}
+    \begin{itemize}
+        \item Support for up to 10,000 users and 100,000 apartments.
+        \item Indexes on frequently used fields for query optimization.
+    \end{itemize}
+    
+    \item \textbf{Reliability:}
+    \begin{itemize}
+        \item Transactionality of critical operations (profile creation, rating saving).
+        \item Daily database backups.
+    \end{itemize}
+    
+    \item \textbf{Security:}
+    \begin{itemize}
+        \item Data personalization: user sees only their profiles and ratings.
+        \item Public profiles are accessible to all, but without user personal information.
+    \end{itemize}
+\end{enumerate}
+
+\section{Preliminary Database Schema}
+
+The database schema is presented as an ER diagram.
+
+% Uncomment and use the following line to include the exported diagram:
+% \begin{figure}[h]
+%     \centering
+%     \includegraphics[width=\textwidth]{database_schema.pdf}
+%     \caption{ER Diagram of PARS Database Schema}
+%     \label{fig:er-diagram}
+% \end{figure}
+
+\subsection{Entity and Relationship Description}
+
+\subsubsection{Main Entities}
+
+\begin{description}
+    \item[\textbf{users}] System users (Telegram users). Contains identifier, Telegram ID, username, timestamps.
+    
+    \item[\textbf{profiles}] User profiles (alias). Contains search filters, factor weights, learning parameters, public flag, reference to forked model.
+    
+    \item[\textbf{pois}] User points of interest (work, gym, etc.). Contains label, coordinates.
+    
+    \item[\textbf{flats}] Apartments from CIAN. Contains all apartment characteristics: price, area, address, coordinates, metro, etc.
+    
+    \item[\textbf{flat\_photos}] Apartment photos. Linked to apartment, contains sequence number, URL, room type.
+    
+    \item[\textbf{photo\_embeddings}] Photo embedding metadata. Stores link to vector in S3, model, dimensionality.
+    
+    \item[\textbf{ratings}] Single user ratings (1-5 on three factors).
+    
+    \item[\textbf{pairwise\_ratings}] Pairwise apartment comparisons by selected factor.
+    
+    \item[\textbf{model\_snapshots}] Trained model checkpoints with metrics.
+    
+    \item[\textbf{profile\_metrics}] Aggregated profile metrics.
+    
+    \item[\textbf{profile\_flat\_score}] Materialized cache of calculated scores for fast ranking.
+\end{description}
+
+\subsubsection{Relationships}
+
+\begin{itemize}
+    \item \texttt{users} $\rightarrow$ \texttt{profiles} (1:N) — one user can have multiple profiles.
+    \item \texttt{users} $\rightarrow$ \texttt{pois} (1:N) — one user can have multiple POIs.
+    \item \texttt{profiles} $\leftrightarrow$ \texttt{pois} (M:N via \texttt{profile\_pois}) — profile can be linked to multiple POIs.
+    \item \texttt{flats} $\rightarrow$ \texttt{flat\_photos} (1:N) — one apartment has many photos.
+    \item \texttt{flat\_photos} $\rightarrow$ \texttt{photo\_embeddings} (1:1) — one photo can have one embedding.
+    \item \texttt{flats} $\leftrightarrow$ \texttt{pois} (M:N via \texttt{flat\_poi\_travel}) — travel time cache.
+    \item \texttt{users} $\times$ \texttt{profiles} $\times$ \texttt{flats} $\rightarrow$ \texttt{ratings} — user ratings of apartments within a profile.
+    \item \texttt{profiles} $\rightarrow$ \texttt{model\_snapshots} (1:N) — profile can have multiple model checkpoints.
+    \item \texttt{profiles} $\rightarrow$ \texttt{profile\_metrics} (1:1) — one profile has one metrics record.
+    \item \texttt{profiles} $\times$ \texttt{flats} $\rightarrow$ \texttt{profile\_flat\_score} — score cache for each pair.
+\end{itemize}
+
+\section{Functional and Multi-Valued Dependencies}
+
+\subsection{Functional Dependencies}
+
+\subsubsection{Table \texttt{users}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{tg\_user\_id}, \texttt{username}, \texttt{created\_at}, \texttt{updated\_at} \\
+    \texttt{tg\_user\_id} &\rightarrow \texttt{id} \quad \text{(uniqueness)}
+\end{align}
+
+\subsubsection{Table \texttt{profiles}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{user\_id}, \texttt{alias}, \texttt{city}, \texttt{cian\_filter}, \texttt{weight\_beauty}, \\
+    &\quad \texttt{weight\_price\_quality}, \texttt{weight\_distance}, \texttt{epsilon\_explore}, \texttt{stage}, \\
+    &\quad \texttt{is\_public}, \texttt{public\_slug}, \texttt{forked\_from\_profile\_id}, \\
+    &\quad \texttt{last\_trained\_snapshot\_id}, \texttt{created\_at}, \texttt{updated\_at} \\
+    (\texttt{user\_id}, \texttt{alias}) &\rightarrow \texttt{id} \quad \text{(uniqueness)} \\
+    \texttt{public\_slug} &\rightarrow \texttt{id} \quad \text{(if specified, uniqueness)}
+\end{align}
+
+\subsubsection{Table \texttt{pois}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{user\_id}, \texttt{label}, \texttt{lat}, \texttt{lng}, \texttt{created\_at} \\
+    (\texttt{user\_id}, \texttt{label}) &\rightarrow \texttt{id} \quad \text{(uniqueness)}
+\end{align}
+
+\subsubsection{Table \texttt{flats}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{cian\_id}, \texttt{url}, \texttt{city}, \texttt{address}, \texttt{lat}, \texttt{lng}, \\
+    &\quad \texttt{price\_rub}, \texttt{rooms}, \texttt{area\_sqm}, \texttt{floor}, \texttt{floors\_total}, \\
+    &\quad \texttt{building\_year}, \texttt{material}, \texttt{nearest\_metro}, \texttt{metro\_distance\_m}, \\
+    &\quad \texttt{published\_at}, \texttt{fetched\_at}, \texttt{active}, \texttt{deactivated\_at} \\
+    \texttt{cian\_id} &\rightarrow \texttt{id} \quad \text{(uniqueness)}
+\end{align}
+
+\subsubsection{Table \texttt{flat\_photos}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{flat\_id}, \texttt{seq}, \texttt{url}, \texttt{room\_type}, \texttt{created\_at} \\
+    (\texttt{flat\_id}, \texttt{seq}) &\rightarrow \texttt{id} \quad \text{(uniqueness)}
+\end{align}
+
+\subsubsection{Table \texttt{photo\_embeddings}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{photo\_id}, \texttt{storage\_uri}, \texttt{model}, \texttt{dim}, \texttt{created\_at} \\
+    \texttt{photo\_id} &\rightarrow \texttt{id} \quad \text{(uniqueness, 1:1 with flat\_photos)}
+\end{align}
+
+\subsubsection{Table \texttt{ratings}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{user\_id}, \texttt{profile\_id}, \texttt{flat\_id}, \texttt{beauty}, \\
+    &\quad \texttt{price\_quality}, \texttt{distance\_pref}, \texttt{skipped}, \texttt{source}, \texttt{created\_at} \\
+    (\texttt{user\_id}, \texttt{profile\_id}, \texttt{flat\_id}) &\rightarrow \texttt{id} \quad \text{(uniqueness)}
+\end{align}
+
+\subsubsection{Table \texttt{pairwise\_ratings}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{user\_id}, \texttt{profile\_id}, \texttt{flat\_a\_id}, \texttt{flat\_b\_id}, \\
+    &\quad \texttt{factor}, \texttt{preferred\_flat\_id}, \texttt{created\_at} \\
+    (\texttt{user\_id}, \texttt{profile\_id}, \texttt{flat\_a\_id}, \texttt{flat\_b\_id}, \texttt{factor}) &\rightarrow \texttt{id} \quad \text{(uniqueness)}
+\end{align}
+
+\subsubsection{Table \texttt{flat\_poi\_travel}}
+\begin{align}
+    (\texttt{flat\_id}, \texttt{poi\_id}, \texttt{mode}) &\rightarrow \texttt{travel\_min}, \texttt{updated\_at}, \texttt{expires\_at} \quad \text{(composite key)}
+\end{align}
+
+\subsubsection{Table \texttt{profile\_pois}}
+\begin{align}
+    (\texttt{profile\_id}, \texttt{poi\_id}) &\rightarrow \texttt{max\_travel\_min}, \texttt{mode}, \texttt{priority} \quad \text{(composite key)}
+\end{align}
+
+\subsubsection{Table \texttt{profile\_flat\_score}}
+\begin{align}
+    (\texttt{profile\_id}, \texttt{flat\_id}) &\rightarrow \texttt{score}, \texttt{beauty\_hat}, \texttt{price\_quality\_hat}, \\
+    &\quad \texttt{distance\_hat}, \texttt{updated\_at} \quad \text{(composite key)}
+\end{align}
+
+\subsubsection{Table \texttt{seen\_flats}, \texttt{saved\_flats}, \texttt{hidden\_flats}}
+\begin{align}
+    (\texttt{user\_id}, \texttt{profile\_id}, \texttt{flat\_id}) &\rightarrow \texttt{first\_seen\_at} / \texttt{saved\_at} / \texttt{hidden\_at} \quad \text{(composite key)}
+\end{align}
+
+\subsubsection{Table \texttt{model\_snapshots}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{profile\_id}, \texttt{backbone}, \texttt{head\_type}, \texttt{storage\_uri}, \\
+    &\quad \texttt{metrics}, \texttt{kendall\_tau\_top20}, \texttt{mae}, \texttt{created\_at}
+\end{align}
+
+\subsubsection{Table \texttt{profile\_metrics}}
+\begin{align}
+    \texttt{profile\_id} &\rightarrow \texttt{ratings\_count}, \texttt{pairwise\_count}, \texttt{stability\_tau}, \texttt{last\_trained\_at} \quad \text{(1:1 with profiles)}
+\end{align}
+
+\subsubsection{Table \texttt{profile\_delivery\_queue}}
+\begin{align}
+    \texttt{id} &\rightarrow \texttt{profile\_id}, \texttt{flat\_id}, \texttt{state}, \texttt{enqueued\_at}, \texttt{updated\_at} \\
+    (\texttt{profile\_id}, \texttt{flat\_id}) &\rightarrow \texttt{id} \quad \text{(uniqueness)}
+\end{align}
+
+\subsection{Multi-Valued Dependencies}
+
+In the considered schema, no multi-valued dependencies (MVD) requiring normalization to 4NF have been found. All M:N relationships are implemented through junction tables, which corresponds to normal form.
+
+A potential multi-valued dependency could arise if photo information were stored together with apartment information in one table, but in our schema this is separated into \texttt{flats} and \texttt{flat\_photos} with a foreign key.
+
+\section{Database Schema Normalization}
+
+\subsection{Normal Form Verification}
+
+\subsubsection{First Normal Form (1NF)}
+
+All tables are in 1NF:
+\begin{itemize}
+    \item All attributes are atomic (no composite values in one field).
+    \item No repeating groups.
+    \item Exception: the \texttt{cian\_filter} field of type JSONB contains structured data, but this is acceptable in modern DBMS for filter flexibility.
+\end{itemize}
+
+\subsubsection{Second Normal Form (2NF)}
+
+All tables are in 2NF:
+\begin{itemize}
+    \item All tables have primary keys.
+    \item No partial dependencies of non-key attributes on composite keys.
+    \item For tables with composite keys (\texttt{flat\_poi\_travel}, \texttt{profile\_pois}, \texttt{profile\_flat\_score}, \texttt{seen\_flats}, \texttt{saved\_flats}, \texttt{hidden\_flats}), all non-key attributes depend on the full composite key.
+\end{itemize}
+
+\subsubsection{Third Normal Form (3NF)}
+
+All tables are in 3NF:
+\begin{itemize}
+    \item No transitive dependencies of non-key attributes.
+    \item All non-key attributes depend only on the primary key.
+\end{itemize}
+
+\subsubsection{Boyce-Codd Normal Form (BCNF)}
+
+All tables are in BCNF:
+\begin{itemize}
+    \item For each functional dependency $X \rightarrow Y$, where $X$ is not a superkey, it has been verified that no such dependency exists, or it is trivial.
+    \item All determinants are potential keys.
+    
+    \textbf{Example verification for \texttt{ratings}:}
+    \begin{itemize}
+        \item Dependency $(\texttt{user\_id}, \texttt{profile\_id}, \texttt{flat\_id}) \rightarrow \texttt{id}$ — determinant is a key, OK.
+        \item Dependency $\texttt{id} \rightarrow$ all other attributes — determinant is a key, OK.
+        \item No other non-trivial dependencies where determinant is not a key.
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Fourth Normal Form (4NF) — Optional}
+
+All tables are in 4NF:
+\begin{itemize}
+    \item No multi-valued dependencies not following from keys have been found.
+    \item All M:N relationships are implemented through junction tables.
+\end{itemize}
+
+\subsection{Example of Problems Due to Undernormalization}
+
+If we were to combine the \texttt{flats} and \texttt{flat\_photos} tables into one table with repeating groups:
+
+\textbf{Problematic schema:}
+\begin{lstlisting}[language=SQL]
+CREATE TABLE flats_with_photos (
+    flat_id BIGINT PRIMARY KEY,
+    cian_id BIGINT UNIQUE,
+    price_rub INTEGER,
+    -- ... other apartment fields
+    photo_url_1 TEXT,
+    photo_url_2 TEXT,
+    photo_url_3 TEXT,
+    -- ... maximum N photos
+    photo_seq_1 INTEGER,
+    photo_seq_2 INTEGER,
+    -- ...
+);
+\end{lstlisting}
+
+\textbf{Problems:}
+\begin{enumerate}
+    \item \textbf{Photo count limitation:} If an apartment has more photos than fields provided, information is lost or requires schema changes.
+    
+    \item \textbf{Storage redundancy:} For apartments with fewer photos, most fields will be NULL, increasing table size.
+    
+    \item \textbf{Query complexity:} Finding all photos requires checking multiple fields (photo\_url\_1, photo\_url\_2, ...).
+    
+    \item \textbf{Atomicity violation:} Fields photo\_url\_N and photo\_seq\_N are logically related but stored separately, which can lead to inconsistency.
+    
+    \item \textbf{Update complexity:} Adding or removing a photo requires updating multiple fields.
+\end{enumerate}
+
+\textbf{Solution through normalization:} Separation into \texttt{flats} and \texttt{flat\_photos} with a foreign key eliminates all these problems.
+
+\section{SQL DDL Script for Database Creation}
+
+\begin{lstlisting}[language=SQL, caption=DDL script for creating PARS: Personalized Apartment Ranking System database]
+-- ============================================================
+-- PARS: Personalized Apartment Ranking System Database Schema
+-- PostgreSQL 15+
+-- ============================================================
+
+-- Creation of sequences for auto-increment (bigserial uses them automatically)
+
+-- Table users
+CREATE TABLE users (
+    id BIGSERIAL PRIMARY KEY,
+    tg_user_id BIGINT,
+    username TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX ix_users_tg_user_id ON users (tg_user_id) WHERE tg_user_id IS NOT NULL;
+
+-- Table flats (independent, created before profiles to avoid circular dependencies)
+CREATE TABLE flats (
+    id BIGSERIAL PRIMARY KEY,
+    cian_id BIGINT NOT NULL UNIQUE,
+    url TEXT NOT NULL,
+    city TEXT NOT NULL,
+    address TEXT,
+    lat NUMERIC(10,7),
+    lng NUMERIC(10,7),
+    price_rub INTEGER,
+    rooms INTEGER,
+    area_sqm NUMERIC(7,2),
+    floor INTEGER,
+    floors_total INTEGER,
+    building_year INTEGER,
+    material TEXT,
+    nearest_metro TEXT,
+    metro_distance_m INTEGER,
+    published_at TIMESTAMPTZ,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    deactivated_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_flats_active ON flats (active);
+CREATE INDEX idx_flats_city_published ON flats (city, published_at);
+
+-- Table profiles
+CREATE TABLE profiles (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    alias TEXT NOT NULL,
+    city TEXT NOT NULL,
+    cian_filter JSONB NOT NULL,
+    weight_beauty NUMERIC(5,3) NOT NULL DEFAULT 0.50,
+    weight_price_quality NUMERIC(5,3) NOT NULL DEFAULT 0.30,
+    weight_distance NUMERIC(5,3) NOT NULL DEFAULT 0.20,
+    epsilon_explore NUMERIC(5,3) NOT NULL DEFAULT 0.20,
+    stage TEXT NOT NULL DEFAULT 'single' CHECK (stage IN ('single', 'pairwise')),
+    is_public BOOLEAN NOT NULL DEFAULT FALSE,
+    public_slug TEXT UNIQUE,
+    forked_from_profile_id BIGINT REFERENCES profiles(id),
+    last_trained_snapshot_id BIGINT, -- FK will be added after creating model_snapshots
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uix_profile_user_alias UNIQUE (user_id, alias),
+    CONSTRAINT chk_weights_sum CHECK (
+        ABS(weight_beauty + weight_price_quality + weight_distance - 1.0) < 0.001
+    )
+);
+
+CREATE INDEX idx_profiles_user_id ON profiles (user_id);
+CREATE INDEX idx_profiles_public_slug ON profiles (public_slug) WHERE public_slug IS NOT NULL;
+
+-- Table pois
+CREATE TABLE pois (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    lat NUMERIC(10,7) NOT NULL,
+    lng NUMERIC(10,7) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uix_pois_user_label UNIQUE (user_id, label)
+);
+
+CREATE INDEX idx_pois_user_id ON pois (user_id);
+
+-- Table profile_pois (junction M:N)
+CREATE TABLE profile_pois (
+    profile_id BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    poi_id BIGINT NOT NULL REFERENCES pois(id) ON DELETE CASCADE,
+    max_travel_min INTEGER NOT NULL DEFAULT 45,
+    mode TEXT NOT NULL DEFAULT 'masstransit' CHECK (mode IN ('masstransit', 'driving', 'walking', 'cycling')),
+    priority INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (profile_id, poi_id)
+);
+
+-- Table flat_photos
+CREATE TABLE flat_photos (
+    id BIGSERIAL PRIMARY KEY,
+    flat_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    room_type TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uix_flat_photos_flat_seq UNIQUE (flat_id, seq)
+);
+
+CREATE INDEX idx_flat_photos_flat_id ON flat_photos (flat_id);
+
+-- Table photo_embeddings
+CREATE TABLE photo_embeddings (
+    id BIGSERIAL PRIMARY KEY,
+    photo_id BIGINT NOT NULL REFERENCES flat_photos(id) ON DELETE CASCADE,
+    storage_uri TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT 'CLIP-ViT-B/32',
+    dim INTEGER NOT NULL DEFAULT 512,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uix_photo_embeddings_photo_id UNIQUE (photo_id)
+);
+
+-- Table flat_poi_travel (travel time cache)
+CREATE TABLE flat_poi_travel (
+    flat_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    poi_id BIGINT NOT NULL REFERENCES pois(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL DEFAULT 'masstransit',
+    travel_min INTEGER,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ,
+    PRIMARY KEY (flat_id, poi_id, mode)
+);
+
+CREATE INDEX idx_flat_poi_travel_poi_id ON flat_poi_travel (poi_id);
+
+-- Table ratings
+CREATE TABLE ratings (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    profile_id BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    flat_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    beauty INTEGER CHECK (beauty IS NULL OR (beauty >= 1 AND beauty <= 5)),
+    price_quality INTEGER CHECK (price_quality IS NULL OR (price_quality >= 1 AND price_quality <= 5)),
+    distance_pref INTEGER CHECK (distance_pref IS NULL OR (distance_pref >= 1 AND distance_pref <= 5)),
+    skipped BOOLEAN NOT NULL DEFAULT FALSE,
+    source TEXT NOT NULL DEFAULT 'telegram',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uix_ratings_user_profile_flat UNIQUE (user_id, profile_id, flat_id),
+    CONSTRAINT chk_ratings_at_least_one_factor CHECK (
+        beauty IS NOT NULL OR price_quality IS NOT NULL OR distance_pref IS NOT NULL OR skipped = TRUE
+    )
+);
+
+CREATE INDEX idx_ratings_profile_created ON ratings (profile_id, created_at);
+CREATE INDEX idx_ratings_user_profile ON ratings (user_id, profile_id);
+
+-- Table pairwise_ratings
+CREATE TABLE pairwise_ratings (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    profile_id BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    flat_a_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    flat_b_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    factor TEXT NOT NULL CHECK (factor IN ('beauty', 'price_quality', 'distance')),
+    preferred_flat_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uix_pairwise_user_profile_flats_factor UNIQUE (user_id, profile_id, flat_a_id, flat_b_id, factor),
+    CONSTRAINT chk_pairwise_different_flats CHECK (flat_a_id != flat_b_id),
+    CONSTRAINT chk_pairwise_preferred_valid CHECK (preferred_flat_id IN (flat_a_id, flat_b_id))
+);
+
+CREATE INDEX idx_pairwise_profile_created ON pairwise_ratings (profile_id, created_at);
+
+-- Table model_snapshots
+CREATE TABLE model_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    profile_id BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    backbone TEXT NOT NULL DEFAULT 'CLIP-ViT-B/32',
+    head_type TEXT NOT NULL DEFAULT 'MLP',
+    storage_uri TEXT NOT NULL,
+    metrics JSONB,
+    kendall_tau_top20 NUMERIC(5,3),
+    mae NUMERIC(6,4),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_snapshots_profile_created ON model_snapshots (profile_id, created_at);
+
+-- Add FK for profiles.last_trained_snapshot_id
+ALTER TABLE profiles ADD CONSTRAINT fk_profiles_last_snapshot 
+    FOREIGN KEY (last_trained_snapshot_id) REFERENCES model_snapshots(id);
+
+-- Table profile_metrics
+CREATE TABLE profile_metrics (
+    profile_id BIGINT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    ratings_count INTEGER NOT NULL DEFAULT 0,
+    pairwise_count INTEGER NOT NULL DEFAULT 0,
+    stability_tau NUMERIC(5,3),
+    last_trained_at TIMESTAMPTZ
+);
+
+-- Table profile_delivery_queue
+CREATE TABLE profile_delivery_queue (
+    id BIGSERIAL PRIMARY KEY,
+    profile_id BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    flat_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'shown', 'rated', 'skipped')),
+    enqueued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uix_queue_profile_flat UNIQUE (profile_id, flat_id)
+);
+
+CREATE INDEX idx_queue_profile_state ON profile_delivery_queue (profile_id, state);
+
+-- Table seen_flats
+CREATE TABLE seen_flats (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    profile_id BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    flat_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, profile_id, flat_id)
+);
+
+CREATE INDEX idx_seen_profile_flat ON seen_flats (profile_id, flat_id);
+
+-- Table saved_flats
+CREATE TABLE saved_flats (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    profile_id BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    flat_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, profile_id, flat_id)
+);
+
+CREATE INDEX idx_saved_profile_flat ON saved_flats (profile_id, flat_id);
+
+-- Table hidden_flats
+CREATE TABLE hidden_flats (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    profile_id BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    flat_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    hidden_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, profile_id, flat_id)
+);
+
+CREATE INDEX idx_hidden_profile_flat ON hidden_flats (profile_id, flat_id);
+
+-- Table profile_flat_score (materialized cache)
+CREATE TABLE profile_flat_score (
+    profile_id BIGINT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    flat_id BIGINT NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+    score NUMERIC(8,5) NOT NULL,
+    beauty_hat NUMERIC(6,4),
+    price_quality_hat NUMERIC(6,4),
+    distance_hat NUMERIC(6,4),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (profile_id, flat_id)
+);
+
+CREATE INDEX idx_score_profile_score ON profile_flat_score (profile_id, score DESC);
+CREATE INDEX idx_score_flat_id ON profile_flat_score (flat_id);
+\end{lstlisting}
+
+\section{SQL DML Queries Implementing Functional Requirements}
+
+\subsection{Query 1: Register New User}
+
+\begin{lstlisting}[language=SQL, caption=Creating a new user]
+INSERT INTO users (tg_user_id, username)
+VALUES (123456789, 'username')
+RETURNING id;
+\end{lstlisting}
+
+\subsection{Query 2: Create Profile}
+
+\begin{lstlisting}[language=SQL, caption=Creating a new profile with filters]
+INSERT INTO profiles (user_id, alias, city, cian_filter, weight_beauty, weight_price_quality, weight_distance)
+VALUES (
+    1,
+    'work_45min',
+    'Moscow',
+    '{"min_price": 30000, "max_price": 80000, "rooms": [1, 2]}'::jsonb,
+    0.5,
+    0.3,
+    0.2
+)
+RETURNING id;
+\end{lstlisting}
+
+\subsection{Query 3: Add POI and Link to Profile}
+
+\begin{lstlisting}[language=SQL, caption=Creating POI and linking to profile]
+-- Create POI
+INSERT INTO pois (user_id, label, lat, lng)
+VALUES (1, 'Work', 55.7558, 37.6173)
+RETURNING id;
+
+-- Link to profile
+INSERT INTO profile_pois (profile_id, poi_id, max_travel_min, mode)
+VALUES (1, 1, 45, 'masstransit');
+\end{lstlisting}
+
+\subsection{Query 4: Get Next Apartment for Rating}
+
+\begin{lstlisting}[language=SQL, caption=Select next apartment to show user]
+SELECT f.*
+FROM flats f
+WHERE f.city = 'Moscow'
+    AND f.active = TRUE
+    AND f.price_rub BETWEEN 30000 AND 80000
+    AND f.rooms IN (1, 2)
+    AND NOT EXISTS (
+        SELECT 1 FROM ratings r
+        WHERE r.user_id = 1
+            AND r.profile_id = 1
+            AND r.flat_id = f.id
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM hidden_flats hf
+        WHERE hf.user_id = 1
+            AND hf.profile_id = 1
+            AND hf.flat_id = f.id
+    )
+    AND EXISTS (
+        SELECT 1 FROM flat_photos fp
+        WHERE fp.flat_id = f.id
+            AND EXISTS (
+                SELECT 1 FROM photo_embeddings pe
+                WHERE pe.photo_id = fp.id
+            )
+    )
+ORDER BY RANDOM()
+LIMIT 1;
+\end{lstlisting}
+
+\subsection{Query 5: Save Apartment Rating}
+
+\begin{lstlisting}[language=SQL, caption=Save apartment rating by user]
+INSERT INTO ratings (user_id, profile_id, flat_id, beauty, price_quality, distance_pref, skipped)
+VALUES (1, 1, 100, 5, 4, 3, FALSE)
+ON CONFLICT (user_id, profile_id, flat_id)
+DO UPDATE SET
+    beauty = EXCLUDED.beauty,
+    price_quality = EXCLUDED.price_quality,
+    distance_pref = EXCLUDED.distance_pref,
+    skipped = EXCLUDED.skipped;
+\end{lstlisting}
+
+\subsection{Query Save pairwise comparison}
+
+\begin{lstlisting}[language=SQL, caption=Add pairwise comparison of apartments]
+INSERT INTO pairwise_ratings (user_id, profile_id, flat_a_id, flat_b_id, factor, preferred_flat_id)
+VALUES (1, 1, 100, 101, 'beauty', 100)
+ON CONFLICT (user_id, profile_id, flat_a_id, flat_b_id, factor)
+DO UPDATE SET preferred_flat_id = EXCLUDED.preferred_flat_id;
+\end{lstlisting}
+
+\subsection{Query 7: Get Top-N Recommendations for Profile}
+
+\begin{lstlisting}[language=SQL, caption=Get best apartments by score]
+SELECT 
+    f.*,
+    pfs.score,
+    pfs.beauty_hat,
+    pfs.price_quality_hat,
+    pfs.distance_hat
+FROM profile_flat_score pfs
+JOIN flats f ON f.id = pfs.flat_id
+WHERE pfs.profile_id = 1
+    AND f.active = TRUE
+    AND NOT EXISTS (
+        SELECT 1 FROM hidden_flats hf
+        WHERE hf.user_id = 1
+            AND hf.profile_id = 1
+            AND hf.flat_id = f.id
+    )
+ORDER BY pfs.score DESC
+LIMIT 10;
+\end{lstlisting}
+
+\subsection{Query 8: Get User Rating History}
+
+\begin{lstlisting}[language=SQL, caption=View all user ratings in profile]
+SELECT 
+    r.id,
+    r.created_at,
+    f.price_rub,
+    f.area_sqm,
+    f.address,
+    r.beauty,
+    r.price_quality,
+    r.distance_pref,
+    r.skipped
+FROM ratings r
+JOIN flats f ON f.id = r.flat_id
+WHERE r.user_id = 1
+    AND r.profile_id = 1
+ORDER BY r.created_at DESC;
+\end{lstlisting}
+
+\subsection{Query Get public profiles}
+
+\begin{lstlisting}[language=SQL, caption=List of public profiles]
+SELECT 
+    p.id,
+    p.alias,
+    p.city,
+    p.public_slug,
+    pm.ratings_count,
+    pm.stability_tau,
+    u.username
+FROM profiles p
+JOIN users u ON u.id = p.user_id
+LEFT JOIN profile_metrics pm ON pm.profile_id = p.id
+WHERE p.is_public = TRUE
+ORDER BY pm.ratings_count DESC, p.created_at DESC;
+\end{lstlisting}
+
+\subsection{Query Forking profile}
+
+\begin{lstlisting}[language=SQL, caption=Create copy of profile with weights preserved]
+INSERT INTO profiles (
+    user_id,
+    alias,
+    city,
+    cian_filter,
+    weight_beauty,
+    weight_price_quality,
+    weight_distance,
+    epsilon_explore,
+    stage,
+    forked_from_profile_id,
+    last_trained_snapshot_id
+)
+SELECT 
+        2, -- new user_id
+    'work_45min_copy',
+    city,
+    cian_filter,
+    weight_beauty,
+    weight_price_quality,
+    weight_distance,
+    epsilon_explore,
+    stage,
+        id, -- original profile_id
+    last_trained_snapshot_id
+FROM profiles
+WHERE id = 1
+RETURNING id;
+\end{lstlisting}
+
+\subsection{Query 11: Update Profile Metrics}
+
+\begin{lstlisting}[language=SQL, caption=Update rating counters and metrics]
+INSERT INTO profile_metrics (profile_id, ratings_count, pairwise_count, stability_tau, last_trained_at)
+SELECT 
+    1,
+    COUNT(*) FILTER (WHERE r.id IS NOT NULL),
+    COUNT(*) FILTER (WHERE pr.id IS NOT NULL),
+    0.85, -- calculated stability
+    NOW()
+FROM profiles p
+LEFT JOIN ratings r ON r.profile_id = p.id
+LEFT JOIN pairwise_ratings pr ON pr.profile_id = p.id
+WHERE p.id = 1
+GROUP BY p.id
+ON CONFLICT (profile_id)
+DO UPDATE SET
+    ratings_count = EXCLUDED.ratings_count,
+    pairwise_count = EXCLUDED.pairwise_count,
+    stability_tau = EXCLUDED.stability_tau,
+    last_trained_at = EXCLUDED.last_trained_at;
+\end{lstlisting}
+
+\subsection{Query Save travel time (caching)}
+
+\begin{lstlisting}[language=SQL, caption=Add or update travel time cache]
+INSERT INTO flat_poi_travel (flat_id, poi_id, mode, travel_min, expires_at)
+VALUES (100, 1, 'masstransit', 35, NOW() + INTERVAL '7 days')
+ON CONFLICT (flat_id, poi_id, mode)
+DO UPDATE SET
+    travel_min = EXCLUDED.travel_min,
+    updated_at = NOW(),
+    expires_at = EXCLUDED.expires_at;
+\end{lstlisting}
+
+\subsection{Query Get apartments with expired cache travel time}
+
+\begin{lstlisting}[language=SQL, caption=Search records for travel time recalculation]
+SELECT DISTINCT fpt.flat_id, fpt.poi_id, fpt.mode
+FROM flat_poi_travel fpt
+WHERE fpt.expires_at < NOW()
+    OR fpt.expires_at IS NULL
+LIMIT 100;
+\end{lstlisting}
+
+\subsection{Query Save apartment to favorites}
+
+\begin{lstlisting}[language=SQL, caption=Add apartment to favorites]
+INSERT INTO saved_flats (user_id, profile_id, flat_id)
+VALUES (1, 1, 100)
+ON CONFLICT (user_id, profile_id, flat_id) DO NOTHING;
+\end{lstlisting}
+
+\subsection{Query Hide apartment}
+
+\begin{lstlisting}[language=SQL, caption=Hide apartment from user]
+INSERT INTO hidden_flats (user_id, profile_id, flat_id)
+VALUES (1, 1, 100)
+ON CONFLICT (user_id, profile_id, flat_id) DO NOTHING;
+\end{lstlisting}
+
+\section{Grouping Queries into Transactions}
+
+\subsection{Transaction 1: Create Profile with POI}
+
+\begin{lstlisting}[language=SQL, caption=Atomic creation of profile and POI linking (using WITH to pass ID)]
+BEGIN;
+
+-- Create profile and get its ID through CTE
+WITH new_profile AS (
+    INSERT INTO profiles (user_id, alias, city, cian_filter, weight_beauty, weight_price_quality, weight_distance)
+    VALUES (
+        1,
+        'work_45min',
+        'Moscow',
+        '{"min_price": 30000, "max_price": 80000, "rooms": [1, 2]}'::jsonb,
+        0.5,
+        0.3,
+        0.2
+    ) RETURNING id
+),
+new_poi AS (
+    INSERT INTO pois (user_id, label, lat, lng)
+    VALUES (1, 'Work', 55.7558, 37.6173)
+    ON CONFLICT (user_id, label) DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng
+    RETURNING id
+)
+INSERT INTO profile_pois (profile_id, poi_id, max_travel_min, mode)
+SELECT np.id, npoi.id, 45, 'masstransit'
+FROM new_profile np, new_poi npoi;
+
+-- Create metrics record (use subquery to get last created profile)
+INSERT INTO profile_metrics (profile_id, ratings_count, pairwise_count)
+SELECT id, 0, 0
+FROM profiles
+WHERE user_id = 1 AND alias = 'work_45min'
+ON CONFLICT (profile_id) DO NOTHING;
+
+COMMIT;
+
+\end{lstlisting}
+
+\textbf{Note:} In real implementation (e.g., in PL/pgSQL or through ORM) variables are used for storing ID. In pure SQL CTE (Common Table Expressions) or subqueries are used.
+
+\subsection{Transaction 2: Save Rating and Update Metrics}
+
+\begin{lstlisting}[language=SQL, caption=Atomic save rating and update counters]
+BEGIN;
+
+-- Save rating
+INSERT INTO ratings (user_id, profile_id, flat_id, beauty, price_quality, distance_pref, skipped)
+VALUES (1, 1, 100, 5, 4, 3, FALSE)
+ON CONFLICT (user_id, profile_id, flat_id)
+DO UPDATE SET
+    beauty = EXCLUDED.beauty,
+    price_quality = EXCLUDED.price_quality,
+    distance_pref = EXCLUDED.distance_pref,
+    skipped = EXCLUDED.skipped;
+
+-- Update profile metrics
+UPDATE profile_metrics
+SET ratings_count = (
+    SELECT COUNT(*) FROM ratings WHERE profile_id = 1
+)
+WHERE profile_id = 1;
+
+-- Add to queue as 'rated'
+INSERT INTO profile_delivery_queue (profile_id, flat_id, state)
+VALUES (1, 100, 'rated')
+ON CONFLICT (profile_id, flat_id)
+DO UPDATE SET state = 'rated', updated_at = NOW();
+
+COMMIT;
+\end{lstlisting}
+
+\subsection{Transaction 3: Save Model and Update Profile}
+
+\begin{lstlisting}[language=SQL, caption=Atomic save model snapshot and update profile]
+BEGIN;
+
+-- Save model snapshot and update profile through CTE
+WITH new_snapshot AS (
+    INSERT INTO model_snapshots (
+        profile_id,
+        backbone,
+        head_type,
+        storage_uri,
+        metrics,
+        kendall_tau_top20,
+        mae
+    )
+    VALUES (
+        1,
+        'CLIP-ViT-B/32',
+        'MLP',
+        's3://models/profile_1_snapshot_20241207.pt',
+        '{"train_loss": 0.234, "val_loss": 0.267}'::jsonb,
+        0.85,
+        0.42
+    )
+    RETURNING id, profile_id
+)
+UPDATE profiles
+SET last_trained_snapshot_id = new_snapshot.id,
+    stage = 'pairwise',
+    updated_at = NOW()
+FROM new_snapshot
+WHERE profiles.id = new_snapshot.profile_id;
+
+-- Update profile metrics
+UPDATE profile_metrics
+SET last_trained_at = NOW(),
+    stability_tau = 0.85
+WHERE profile_id = 1;
+
+COMMIT;
+\end{lstlisting}
+
+\subsection{Transaction 4: Batch Add Apartments with Photos}
+
+\begin{lstlisting}[language=SQL, caption=Atomic add apartment with photos]
+BEGIN;
+
+-- Add apartment and photos through CTE
+WITH new_flat AS (
+    INSERT INTO flats (
+        cian_id, url, city, address, lat, lng,
+        price_rub, rooms, area_sqm, floor, floors_total,
+        nearest_metro, published_at
+    )
+    VALUES (
+        12345,
+        'https://cian.ru/...',
+        'Moscow',
+        'ул. Ленина, 1',
+        55.7558,
+        37.6173,
+        50000,
+        2,
+        45.5,
+        5,
+        9,
+        'Красные Ворота',
+        NOW()
+    )
+    RETURNING id
+)
+INSERT INTO flat_photos (flat_id, seq, url, room_type)
+SELECT nf.id, seq, url, room_type
+FROM new_flat nf,
+(VALUES
+    (1, 'https://cdn.cian.ru/photo1.jpg', 'living'),
+    (2, 'https://cdn.cian.ru/photo2.jpg', 'kitchen'),
+    (3, 'https://cdn.cian.ru/photo3.jpg', 'bathroom')
+) AS photos(seq, url, room_type);
+
+COMMIT;
+\end{lstlisting}
+
+\subsection{Transaction 5: Forking Profile with POI Copying}
+
+\begin{lstlisting}[language=SQL, caption=Atomic creation of profile fork]
+BEGIN;
+
+-- Create new profile based on existing one
+WITH forked_profile AS (
+    INSERT INTO profiles (
+        user_id, alias, city, cian_filter,
+        weight_beauty, weight_price_quality, weight_distance,
+        epsilon_explore, stage, forked_from_profile_id,
+        last_trained_snapshot_id
+    )
+    SELECT 
+        2, -- new user
+        'my_work_profile',
+        city,
+        cian_filter,
+        weight_beauty,
+        weight_price_quality,
+        weight_distance,
+        epsilon_explore,
+        stage,
+        id, -- original profile
+        last_trained_snapshot_id
+    FROM profiles
+    WHERE id = 1
+    RETURNING id
+)
+INSERT INTO profile_metrics (profile_id, ratings_count, pairwise_count)
+SELECT id, 0, 0
+FROM forked_profile;
+
+-- Copy relationships with POI (for new user need to create own POI)
+-- Assume that POIs are already created
+
+-- Create metrics for new profile
+INSERT INTO profile_metrics (profile_id, ratings_count, pairwise_count)
+VALUES (new_profile_id_var, 0, 0);
+
+COMMIT;
+\end{lstlisting}
+
+\section{Conclusion}
+
+This document presents complete database design for the PARS: Personalized Apartment Ranking System — a personalized apartment ranking service. 
+
+The database is designed taking into account all functional requirements, normalized to BCNF (and optionally to 4NF), contains necessary integrity constraints and indexes for performance optimization.
+
+The schema supports:
+\begin{itemize}
+    \item Multiple user profiles with flexible filters
+    \item Rating system and pairwise comparisons for training ML models
+    \item Caching of travel time and model predictions
+    \item Public profiles and forking capability
+    \item Delivery queue and view history
+\end{itemize}
+
+All queries are grouped into transactions to ensure atomicity of critical operations.
+
+\end{document}
+

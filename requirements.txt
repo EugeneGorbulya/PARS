@@ -10,3 +10,4 @@ httpx
 aioboto3
 types-aioboto3
 aiogram
+cianparser

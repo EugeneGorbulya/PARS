@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from datetime import datetime
 
 from models import Flat, FlatPhoto
-from services.cian_parser.client import CianClient
+from services.cian_parser.client import CianClient, CianCaptchaError
 
 class CianFetcherService:
     def __init__(self, session: AsyncSession):
@@ -17,7 +17,14 @@ class CianFetcherService:
         Main entry point: fetches offers from CIAN and saves/updates them in DB.
         """
         print(f"Starting fetch for region {region_id} with filters {filters}")
-        raw_offers = await self.client.get_all_offers(region_id=region_id, **filters)
+        
+        try:
+            raw_offers = await self.client.get_all_offers(region_id=region_id, **filters)
+        except CianCaptchaError as e:
+            print(f"❌ Не удалось получить данные: {e}")
+            print("   CIAN требует прохождение капчи. Попробуйте позже или используйте другой метод.")
+            return 0
+        
         print(f"Fetched {len(raw_offers)} offers")
 
         saved_count = 0
