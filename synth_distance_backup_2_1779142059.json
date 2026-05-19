@@ -1,0 +1,345 @@
+{
+  "profile_id": 2,
+  "source_score": 4,
+  "target_score": 3,
+  "keep_travel": true,
+  "travel_min_gt_filter": null,
+  "travel_min_range": [
+    5,
+    15
+  ],
+  "ratings": [
+    {
+      "rating_id": 446,
+      "flat_id": 1737,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 7,
+      "flat_id": 654,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 592,
+      "flat_id": 50,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 616,
+      "flat_id": 646,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 784,
+      "flat_id": 419,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 532,
+      "flat_id": 1466,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 418,
+      "flat_id": 2083,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 793,
+      "flat_id": 55,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 281,
+      "flat_id": 838,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 238,
+      "flat_id": 905,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 505,
+      "flat_id": 17,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 754,
+      "flat_id": 539,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 790,
+      "flat_id": 1461,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 190,
+      "flat_id": 2005,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 359,
+      "flat_id": 1942,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 907,
+      "flat_id": 1427,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 409,
+      "flat_id": 167,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 934,
+      "flat_id": 1430,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 946,
+      "flat_id": 1013,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 712,
+      "flat_id": 117,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 652,
+      "flat_id": 96,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 223,
+      "flat_id": 1981,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 550,
+      "flat_id": 238,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 214,
+      "flat_id": 1248,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 145,
+      "flat_id": 554,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 721,
+      "flat_id": 2011,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 736,
+      "flat_id": 378,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 220,
+      "flat_id": 1271,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 293,
+      "flat_id": 503,
+      "distance_pref": 4
+    },
+    {
+      "rating_id": 496,
+      "flat_id": 1556,
+      "distance_pref": 4
+    }
+  ],
+  "flat_poi_travel": [
+    {
+      "flat_id": 654,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 63
+    },
+    {
+      "flat_id": 554,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    },
+    {
+      "flat_id": 2005,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 59
+    },
+    {
+      "flat_id": 1248,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    },
+    {
+      "flat_id": 1271,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 57
+    },
+    {
+      "flat_id": 1981,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    },
+    {
+      "flat_id": 905,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 59
+    },
+    {
+      "flat_id": 838,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 59
+    },
+    {
+      "flat_id": 503,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 57
+    },
+    {
+      "flat_id": 1942,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 59
+    },
+    {
+      "flat_id": 167,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    },
+    {
+      "flat_id": 2083,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 60
+    },
+    {
+      "flat_id": 1737,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 64
+    },
+    {
+      "flat_id": 1556,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 57
+    },
+    {
+      "flat_id": 17,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 59
+    },
+    {
+      "flat_id": 1466,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 60
+    },
+    {
+      "flat_id": 238,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    },
+    {
+      "flat_id": 50,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 62
+    },
+    {
+      "flat_id": 646,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 61
+    },
+    {
+      "flat_id": 96,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    },
+    {
+      "flat_id": 117,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    },
+    {
+      "flat_id": 55,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 60
+    },
+    {
+      "flat_id": 378,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 57
+    },
+    {
+      "flat_id": 419,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 60
+    },
+    {
+      "flat_id": 539,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 59
+    },
+    {
+      "flat_id": 1013,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    },
+    {
+      "flat_id": 1427,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 59
+    },
+    {
+      "flat_id": 1430,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    },
+    {
+      "flat_id": 1461,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 59
+    },
+    {
+      "flat_id": 2011,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 58
+    }
+  ]
+}

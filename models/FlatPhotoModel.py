@@ -10,6 +10,7 @@ from models.base import Base
 if TYPE_CHECKING:
     from models.FlatModel import Flat
     from models.PhotoEmbeddingModel import PhotoEmbedding
+    from models.PhotoClipEmbeddingModel import PhotoClipEmbedding
 
 class FlatPhoto(Base):
     __tablename__ = "flat_photos"
@@ -28,4 +29,7 @@ class FlatPhoto(Base):
     # Relationships
     flat: Mapped["Flat"] = relationship("Flat", back_populates="photos")
     embedding: Mapped[Optional["PhotoEmbedding"]] = relationship("PhotoEmbedding", back_populates="photo", uselist=False)
+    clip_embedding: Mapped[Optional["PhotoClipEmbedding"]] = relationship(
+        "PhotoClipEmbedding", back_populates="photo", uselist=False
+    )
 

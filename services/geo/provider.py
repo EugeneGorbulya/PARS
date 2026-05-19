@@ -20,3 +20,16 @@ class MockGeoProvider(BaseGeoProvider):
         
         return random.randint(15, 60)
 
+
+def get_geo_provider():
+    """Возвращает провайдер гео: 2GIS если задан DGIS_API_KEY, иначе Mock."""
+    import os
+    key = (os.environ.get("DGIS_API_KEY") or "").strip()
+    if key:
+        try:
+            from services.geo.provider_dgis import DGisGeoProvider
+            return DGisGeoProvider(api_key=key)
+        except Exception:
+            pass
+    return MockGeoProvider()
+

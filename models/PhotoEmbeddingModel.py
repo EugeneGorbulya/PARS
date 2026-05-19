@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from sqlalchemy import (
     BigInteger, Integer, Text, DateTime, ForeignKey, func
 )
@@ -14,6 +14,7 @@ class PhotoEmbedding(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     photo_id: Mapped[int] = mapped_column(ForeignKey("flat_photos.id"), nullable=False, unique=True)
+    flat_id: Mapped[Optional[int]] = mapped_column(ForeignKey("flats.id"), nullable=True, index=True)
     storage_uri: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False, default='CLIP-ViT-B/32')
     dim: Mapped[int] = mapped_column(Integer, nullable=False, default=512)

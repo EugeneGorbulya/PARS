@@ -1,0 +1,7 @@
+# ML / training stack (install alongside requirements.txt for workers & train scripts)
+numpy>=1.24
+torch>=2.1
+torchvision>=0.16
+open-clip-torch>=2.24.0
+Pillow>=10.0
+celery>=5.3

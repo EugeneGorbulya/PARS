@@ -12,7 +12,7 @@ from aiogram.client.default import DefaultBotProperties
 
 from core.config import settings
 from core.session import async_engine
-from bot.handlers import start, profile, browsing
+from bot.handlers import start, profile, browsing, destination, duel, top, train, manage
 
 async def main():
     # Initialize Logging
@@ -25,7 +25,12 @@ async def main():
     # Register Routers (Handlers)
     dp.include_router(start.router)
     dp.include_router(profile.router)
+    dp.include_router(destination.router)
     dp.include_router(browsing.router)
+    dp.include_router(duel.router)
+    dp.include_router(top.router)
+    dp.include_router(train.router)
+    dp.include_router(manage.router)
 
     print("Bot started!")
     await bot.delete_webhook(drop_pending_updates=True)

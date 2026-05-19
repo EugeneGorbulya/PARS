@@ -1,0 +1,125 @@
+{
+  "profile_id": 2,
+  "source_score": 3,
+  "target_score": 2,
+  "keep_travel": true,
+  "travel_min_gt_filter": null,
+  "travel_min_range": [
+    5,
+    15
+  ],
+  "ratings": [
+    {
+      "rating_id": 691,
+      "flat_id": 1009,
+      "distance_pref": 3
+    },
+    {
+      "rating_id": 838,
+      "flat_id": 442,
+      "distance_pref": 3
+    },
+    {
+      "rating_id": 296,
+      "flat_id": 756,
+      "distance_pref": 3
+    },
+    {
+      "rating_id": 622,
+      "flat_id": 794,
+      "distance_pref": 3
+    },
+    {
+      "rating_id": 311,
+      "flat_id": 556,
+      "distance_pref": 3
+    },
+    {
+      "rating_id": 341,
+      "flat_id": 164,
+      "distance_pref": 3
+    },
+    {
+      "rating_id": 607,
+      "flat_id": 1195,
+      "distance_pref": 3
+    },
+    {
+      "rating_id": 811,
+      "flat_id": 353,
+      "distance_pref": 3
+    },
+    {
+      "rating_id": 916,
+      "flat_id": 822,
+      "distance_pref": 3
+    },
+    {
+      "rating_id": 571,
+      "flat_id": 460,
+      "distance_pref": 3
+    }
+  ],
+  "flat_poi_travel": [
+    {
+      "flat_id": 756,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 73
+    },
+    {
+      "flat_id": 556,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 71
+    },
+    {
+      "flat_id": 164,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 70
+    },
+    {
+      "flat_id": 460,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 69
+    },
+    {
+      "flat_id": 1195,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 70
+    },
+    {
+      "flat_id": 794,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 72
+    },
+    {
+      "flat_id": 1009,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 73
+    },
+    {
+      "flat_id": 353,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 69
+    },
+    {
+      "flat_id": 442,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 73
+    },
+    {
+      "flat_id": 822,
+      "poi_id": 1,
+      "mode": "masstransit",
+      "travel_min": 69
+    }
+  ]
+}

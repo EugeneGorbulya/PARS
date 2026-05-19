@@ -6,6 +6,7 @@ from models.ProfilePOIModel import ProfilePOI
 from models.FlatModel import Flat
 from models.FlatPhotoModel import FlatPhoto
 from models.PhotoEmbeddingModel import PhotoEmbedding
+from models.PhotoClipEmbeddingModel import PhotoClipEmbedding
 from models.FlatPoiTravelModel import FlatPoiTravel
 from models.RatingModel import Rating
 from models.PairwiseRatingModel import PairwiseRating
@@ -20,7 +21,7 @@ from models.ProfileFlatScoreModel import ProfileFlatScore
 __all__ = [
     "Base",
     "User", "Profile", "POI", "ProfilePOI",
-    "Flat", "FlatPhoto", "PhotoEmbedding", "FlatPoiTravel",
+    "Flat", "FlatPhoto", "PhotoEmbedding", "PhotoClipEmbedding", "FlatPoiTravel",
     "Rating", "PairwiseRating",
     "ProfileDeliveryQueue", "SeenFlat", "SavedFlat", "HiddenFlat",
     "ModelSnapshot", "ProfileMetrics", "ProfileFlatScore"

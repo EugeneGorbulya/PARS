@@ -45,12 +45,50 @@ class ImageDownloaderService:
                 print(f"Worker unexpected error: {e}")
                 await asyncio.sleep(sleep_time)
 
-    async def process_batch(self, limit: int) -> int:
-        # Find photos without embeddings
+    async def process_photos_for_flat_ids(self, flat_ids: list, max_photos_per_flat: int = 10) -> int:
+        """
+        Скачивает фото только для указанных квартир (для каждой — до max_photos_per_flat первых без эмбеддинга).
+        Возвращает количество обработанных фото.
+        """
+        if not flat_ids:
+            return 0
         stmt = (
             select(FlatPhoto)
             .outerjoin(PhotoEmbedding, FlatPhoto.id == PhotoEmbedding.photo_id)
             .where(PhotoEmbedding.id == None)
+            .where(FlatPhoto.flat_id.in_(flat_ids))
+        )
+        result = await self.session.execute(stmt)
+        photos = result.scalars().all()
+        # Ограничиваем по квартирам: не больше max_photos_per_flat с одной квартиры
+        by_flat: dict = {}
+        for p in photos:
+            by_flat.setdefault(p.flat_id, []).append(p)
+        to_process = []
+        for fid in flat_ids:
+            to_process.extend(by_flat.get(fid, [])[:max_photos_per_flat])
+        if not to_process:
+            return 0
+        async with httpx.AsyncClient(timeout=15.0, headers=self.headers, follow_redirects=True) as http_client:
+            for photo in to_process:
+                try:
+                    await self._process_photo(http_client, photo)
+                    await asyncio.sleep(0.5)
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code in (403, 429):
+                        raise e
+                    await self._mark_as_failed(photo.id, str(e))
+                except Exception as e:
+                    await self._mark_as_failed(photo.id, str(e))
+        return len(to_process)
+
+    async def process_batch(self, limit: int) -> int:
+        # Find photos without embeddings (order for deterministic batches)
+        stmt = (
+            select(FlatPhoto)
+            .outerjoin(PhotoEmbedding, FlatPhoto.id == PhotoEmbedding.photo_id)
+            .where(PhotoEmbedding.id == None)
+            .order_by(FlatPhoto.id)
             .limit(limit)
         )
         
@@ -95,6 +133,7 @@ class ImageDownloaderService:
         # 3. Create record in PhotoEmbedding
         embedding_record = PhotoEmbedding(
             photo_id=photo.id,
+            flat_id=photo.flat_id,
             storage_uri=s3_uri,
             model="raw_image", 
             dim=0

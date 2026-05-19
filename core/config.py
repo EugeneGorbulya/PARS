@@ -4,6 +4,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _env_bool(key: str, default: bool = True) -> bool:
+    raw = os.environ.get(key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 class Settings:
     # Database
     POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
@@ -35,5 +43,9 @@ class Settings:
 
     # Telegram
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+    # Бот: подгружать новые объявления с Циана при нехватке квартир (/next, фон).
+    # CIAN_FETCH_ENABLED=false — только flats уже в БД.
+    CIAN_FETCH_ENABLED = _env_bool("CIAN_FETCH_ENABLED", True)
 
 settings = Settings()
