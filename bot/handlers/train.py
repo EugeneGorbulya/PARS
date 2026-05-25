@@ -1,6 +1,9 @@
 """
 /train — запуск полного ML-пайплайна прямо из бота.
-Stage A → Синтез дуэлей → Stage B → Скоринг → Результат.
+Stage A → Stage B (если есть дуэли) → Скоринг → Результат.
+
+Синтетические дуэли НЕ генерируются автоматически.
+Запускайте вручную: python3 -m scripts.ml.synthesize_pairwise --profile-id N --duels K
 """
 from __future__ import annotations
 
@@ -22,7 +25,6 @@ router = Router()
 # Параметры пайплайна по умолчанию
 DEFAULT_STAGE_A_EPOCHS = 80
 DEFAULT_STAGE_B_EPOCHS = 30
-DEFAULT_SYNTH_DUELS = 250
 DEFAULT_STAGE_B_LR = 1e-4
 
 
@@ -66,7 +68,20 @@ def _format_result(result: PipelineResult) -> str:
         )
 
     best_ep_txt = f"   best epoch: {a.best_epoch + 1}/80\n" if a.best_epoch is not None else ""
-    b_loss_fmt = fmt(b.train_loss)
+
+    if b.skipped:
+        stage_b_block = (
+            "⚡️ <b>Stage B — ранжирование</b>\n"
+            "   ⏭ пропущен (нет дуэлей)\n"
+            "   Сгенерируйте пары: <code>python3 -m scripts.ml.synthesize_pairwise --profile-id N --duels K</code>\n"
+            "   Или соберите реальные через /duel\n\n"
+        )
+    else:
+        stage_b_block = (
+            "⚡️ <b>Stage B — ранжирование</b>\n"
+            f"   пар: {b.n_pairs}\n"
+            f"   pairwise loss: <b>{fmt(b.train_loss)}</b>\n\n"
+        )
 
     return (
         "╔══════════════════════════════╗\n"
@@ -81,8 +96,7 @@ def _format_result(result: PipelineResult) -> str:
         f"{head_line('💰', 'pq MAE      ', a.train_mae_pq,     a.val_mae_pq)}"
         f"{head_line('🚌', 'distance MAE', a.train_mae_dist,   a.val_mae_dist)}\n"
 
-        "⚡️ <b>Stage B — ранжирование</b>\n"
-        f"   pairwise loss: <b>{b_loss_fmt}</b>\n\n"
+        f"{stage_b_block}"
 
         f"🏆 Проскорировано квартир: <b>{result.scored_count}</b>\n\n"
 
@@ -158,7 +172,6 @@ async def cb_train_run(callback: types.CallbackQuery) -> None:
             profile_id=profile_id,
             stage_a_epochs=DEFAULT_STAGE_A_EPOCHS,
             stage_a_lr=1e-3,
-            n_synth_duels=DEFAULT_SYNTH_DUELS,
             stage_b_epochs=DEFAULT_STAGE_B_EPOCHS,
             stage_b_lr=DEFAULT_STAGE_B_LR,
             progress=progress,

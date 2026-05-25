@@ -60,14 +60,15 @@ class SynthResult:
 
 @dataclass
 class StageBResult:
-    train_loss: float
-    snapshot_id: int
+    train_loss: float | None
+    snapshot_id: int | None
+    skipped: bool = False
+    n_pairs: int = 0
 
 
 @dataclass
 class PipelineResult:
     stage_a: StageAResult
-    synth: SynthResult
     stage_b: StageBResult
     scored_count: int
 
@@ -381,11 +382,14 @@ async def run_stage_b(
         raw = await s3.download_bytes(s3_uri=snap.storage_uri)
         bundle = await load_pairwise_bundle(session, profile_id)
 
-    if bundle.clip_a.shape[0] == 0:
-        raise ValueError("Нет пар для Stage B. Сначала запустите синтез дуэлей.")
+    n_pairs = int(bundle.clip_a.shape[0])
+    if n_pairs == 0:
+        if progress:
+            await progress("⏭ Stage B: нет дуэлей — пропускаю.")
+        return StageBResult(train_loss=None, snapshot_id=None, skipped=True, n_pairs=0)
 
     if progress:
-        await progress(f"⚡️ Stage B: дообучение {epochs} эпох на {bundle.clip_a.shape[0]} парах...")
+        await progress(f"⚡️ Stage B: дообучение {epochs} эпох на {n_pairs} парах...")
 
     pkg = load_checkpoint_bytes(raw)
     model, scaler = build_model_from_package(pkg)
@@ -426,7 +430,7 @@ async def run_stage_b(
         await session.commit()
         snap_b_id = snap_b.id
 
-    return StageBResult(train_loss=loss, snapshot_id=snap_b_id)
+    return StageBResult(train_loss=loss, snapshot_id=snap_b_id, skipped=False, n_pairs=n_pairs)
 
 
 # ──────────────────────────────────────────────
@@ -437,14 +441,12 @@ async def run_full_pipeline(
     profile_id: int,
     stage_a_epochs: int = 80,
     stage_a_lr: float = 1e-3,
-    n_synth_duels: int = 250,
     stage_b_epochs: int = 30,
     stage_b_lr: float = 1e-4,
     device: str | None = None,
     progress: ProgressCb | None = None,
 ) -> PipelineResult:
     stage_a = await run_stage_a(profile_id, stage_a_epochs, stage_a_lr, device, progress)
-    synth = await synthesize_pairwise(profile_id, n_synth_duels, progress)
 
     stage_b = await run_stage_b(profile_id, stage_b_epochs, stage_b_lr, device, progress)
 
@@ -455,4 +457,4 @@ async def run_full_pipeline(
     async with async_session() as session:
         scored = await svc_score_flats(session, s3, profile_id, device=device)
 
-    return PipelineResult(stage_a=stage_a, synth=synth, stage_b=stage_b, scored_count=scored)
+    return PipelineResult(stage_a=stage_a, stage_b=stage_b, scored_count=scored)
